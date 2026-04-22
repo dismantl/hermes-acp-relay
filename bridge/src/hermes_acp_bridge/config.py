@@ -1,0 +1,63 @@
+"""Config loader for hermes-acp-bridge.
+
+Reads a TOML file with the relay URL and HTTP Basic auth credentials.
+Kept outside the Obsidian vault so it doesn't accidentally sync.
+"""
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "hermes-acp-bridge" / "config.toml"
+
+
+@dataclass(frozen=True)
+class BridgeConfig:
+    url: str
+    username: str | None
+    password: str | None
+
+
+class ConfigError(Exception):
+    pass
+
+
+def _resolve_path(explicit: str | None) -> Path:
+    if explicit:
+        return Path(explicit).expanduser()
+    env = os.environ.get("HERMES_BRIDGE_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    return DEFAULT_CONFIG_PATH
+
+
+def load_config(explicit_path: str | None = None) -> BridgeConfig:
+    path = _resolve_path(explicit_path)
+    if not path.is_file():
+        raise ConfigError(
+            f"Config file not found at {path}. Create it with at least a 'url' "
+            f"key, plus 'username' and 'password' if the relay is behind an "
+            f"auth-enforcing proxy. See README for an example."
+        )
+
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"Failed to parse {path}: {e}") from e
+
+    url = data.get("url")
+    if not isinstance(url, str) or not url:
+        raise ConfigError(f"{path}: 'url' is required and must be a non-empty string.")
+
+    username = data.get("username")
+    password = data.get("password")
+    if (username is None) != (password is None):
+        raise ConfigError(
+            f"{path}: 'username' and 'password' must both be set, or both omitted."
+        )
+
+    return BridgeConfig(url=url, username=username, password=password)

@@ -1,0 +1,19 @@
+[project]
+name = "hermes-acp-relay"
+version = "0.1.0"
+description = "aiohttp WebSocket server exposing Hermes ACP for network access"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9",
+    "hermes-agent[acp]",
+]
+
+[project.scripts]
+hermes-acp-relay = "hermes_acp_relay.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
