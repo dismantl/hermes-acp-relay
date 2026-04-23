@@ -48,6 +48,8 @@ def load_config(explicit_path: str | None = None) -> BridgeConfig:
             data = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"Failed to parse {path}: {e}") from e
+    except OSError as e:
+        raise ConfigError(f"Failed to read {path}: {e}") from e
 
     url = data.get("url")
     if not isinstance(url, str) or not url:
@@ -59,5 +61,14 @@ def load_config(explicit_path: str | None = None) -> BridgeConfig:
         raise ConfigError(
             f"{path}: 'username' and 'password' must both be set, or both omitted."
         )
+    if username is not None and password is not None:
+        if not isinstance(username, str) or not isinstance(password, str):
+            raise ConfigError(
+                f"{path}: 'username' and 'password' must both be strings when set."
+            )
+        if username == "" or password == "":
+            raise ConfigError(
+                f"{path}: 'username' and 'password' must be non-empty strings when set."
+            )
 
     return BridgeConfig(url=url, username=username, password=password)

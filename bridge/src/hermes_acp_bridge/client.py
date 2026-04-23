@@ -17,12 +17,13 @@ from .config import BridgeConfig
 logger = logging.getLogger(__name__)
 
 _MAX_MSG_SIZE = 50 * 1024 * 1024  # mirror the relay's limit
+_CLEAN_CLOSE_CODES = {aiohttp.WSCloseCode.OK, aiohttp.WSCloseCode.GOING_AWAY}
 
 
 async def run(cfg: BridgeConfig) -> int:
     auth = (
         aiohttp.BasicAuth(cfg.username, cfg.password)
-        if cfg.username and cfg.password
+        if cfg.username is not None and cfg.password is not None
         else None
     )
 
@@ -44,6 +45,7 @@ async def run(cfg: BridgeConfig) -> int:
             logger.error("Connection failed: %s", e)
             return 2
 
+        exit_code = 0
         async with ws:
             logger.info("connected to %s", cfg.url)
             stdin_task = asyncio.create_task(_stdin_to_ws(ws), name="bridge-stdin")
@@ -54,7 +56,9 @@ async def run(cfg: BridgeConfig) -> int:
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            if stdin_task in done and stdout_task in pending:
+            stdin_closed_first = stdin_task in done and stdout_task in pending
+
+            if stdin_closed_first:
                 # stdin EOF first. Close the WS gracefully; any in-flight
                 # server responses get delivered before the close ack, so
                 # we let the stdout pump drain naturally.
@@ -64,9 +68,11 @@ async def run(cfg: BridgeConfig) -> int:
                     await asyncio.wait_for(stdout_task, timeout=5.0)
                 except asyncio.TimeoutError:
                     stdout_task.cancel()
+                    await asyncio.gather(stdout_task, return_exceptions=True)
             else:
                 # WS closed (stdout pump finished) first. Cancel stdin.
                 stdin_task.cancel()
+                await asyncio.gather(stdin_task, return_exceptions=True)
 
             for task in (stdin_task, stdout_task):
                 if task.done() and not task.cancelled():
@@ -76,8 +82,9 @@ async def run(cfg: BridgeConfig) -> int:
 
             if not ws.closed:
                 await ws.close()
+            exit_code = _bridge_exit_code(ws, url=cfg.url, initiated_locally=stdin_closed_first)
     logger.info("disconnected")
-    return 0
+    return exit_code
 
 
 async def _stdin_to_ws(ws: aiohttp.ClientWebSocketResponse) -> None:
@@ -85,18 +92,21 @@ async def _stdin_to_ws(ws: aiohttp.ClientWebSocketResponse) -> None:
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=_MAX_MSG_SIZE)
     protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+    transport, _ = await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
-    while True:
-        line = await reader.readline()
-        if not line:
-            break
-        text = line.decode("utf-8", errors="replace").rstrip("\n")
-        if not text:
-            continue
-        if ws.closed:
-            break
-        await ws.send_str(text)
+    try:
+        while True:
+            line = await reader.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip("\n")
+            if not text:
+                continue
+            if ws.closed:
+                break
+            await ws.send_str(text)
+    finally:
+        transport.close()
 
 
 async def _ws_to_stdout(ws: aiohttp.ClientWebSocketResponse) -> None:
@@ -115,3 +125,24 @@ async def _ws_to_stdout(ws: aiohttp.ClientWebSocketResponse) -> None:
             sys.stdout.flush()
         elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
             return
+
+
+def _bridge_exit_code(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    url: str,
+    initiated_locally: bool,
+) -> int:
+    exc = ws.exception()
+    if exc is not None:
+        logger.error("WebSocket to %s closed with exception: %r", url, exc)
+        return 2
+
+    if initiated_locally and ws.close_code is None:
+        return 0
+
+    if ws.close_code in _CLEAN_CLOSE_CODES:
+        return 0
+
+    logger.error("WebSocket to %s closed unexpectedly with code %s", url, ws.close_code)
+    return 2
