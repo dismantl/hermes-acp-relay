@@ -1,10 +1,10 @@
 """Adapter between aiohttp WebSocket and asyncio StreamReader/StreamWriter.
 
 The ACP SDK's AgentSideConnection enforces isinstance checks against
-asyncio.StreamReader / asyncio.StreamWriter (acp/agent/connection.py:68),
-so we can't hand it a lookalike shim. Instead we create a socket.socketpair():
-one end becomes the real asyncio streams we give to ACP; the other end is
-proxied byte-for-byte to the WebSocket by two background tasks.
+asyncio.StreamReader / asyncio.StreamWriter, so we can't hand it a lookalike
+shim. Instead we create a socket.socketpair(): one end becomes the real
+asyncio streams we give to ACP; the other end is proxied byte-for-byte to the
+WebSocket by two background tasks.
 
 Framing: ACP speaks line-delimited JSON-RPC. One JSON-RPC message ↔ one WS
 text frame. Incoming frames get a trailing newline if the peer forgot it;

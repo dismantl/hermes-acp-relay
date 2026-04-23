@@ -93,7 +93,6 @@ async def run(cfg: BridgeConfig) -> int:
 
 
 async def _stdin_to_ws(ws: aiohttp.ClientWebSocketResponse) -> None:
-    """Read newline-delimited JSON-RPC from stdin, send each line as a WS text frame."""
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=_MAX_MSG_SIZE)
     protocol = asyncio.StreamReaderProtocol(reader)
@@ -115,7 +114,6 @@ async def _stdin_to_ws(ws: aiohttp.ClientWebSocketResponse) -> None:
 
 
 async def _ws_to_stdout(ws: aiohttp.ClientWebSocketResponse) -> None:
-    """Receive WS text frames, write each as a line to stdout."""
     async for msg in ws:
         if msg.type == aiohttp.WSMsgType.TEXT:
             sys.stdout.write(msg.data)
@@ -143,6 +141,8 @@ def _bridge_exit_code(
         logger.error("WebSocket to %s closed with exception: %r", url, exc)
         return 2
 
+    # Locally-initiated close may finish before the peer's close frame arrives,
+    # leaving close_code unset — that's still a clean exit.
     if initiated_locally and ws.close_code is None:
         return 0
 
