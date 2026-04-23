@@ -95,8 +95,8 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
         try:
             handles.writer.close()
             await handles.writer.wait_closed()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("error closing ACP writer for %s: %r", peer, e)
         # Give pump tasks a moment to drain before we tear down the WS.
         try:
             await asyncio.wait_for(
@@ -115,8 +115,8 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
         try:
             handles.bridge_writer.close()
             await handles.bridge_writer.wait_closed()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("error closing bridge writer for %s: %r", peer, e)
         if not ws.closed:
             await ws.close()
         logger.info("client disconnected: %s", peer)
