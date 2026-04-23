@@ -49,20 +49,42 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
 
     handles = await ws_to_asyncio_streams(ws)
     agent = agent_cls()
-    try:
-        await acp.run_agent(
+    runner_task = asyncio.create_task(
+        acp.run_agent(
             agent,
             input_stream=handles.writer,
             output_stream=handles.reader,
             use_unstable_protocol=True,
+        ),
+        name="acp-runner",
+    )
+    try:
+        # If either pump exits (cleanly or by raising) before run_agent does,
+        # run_agent would otherwise block forever waiting on dead streams.
+        done, _ = await asyncio.wait(
+            {runner_task, handles.ws_to_acp_task, handles.acp_to_ws_task},
+            return_when=asyncio.FIRST_COMPLETED,
         )
+        if runner_task not in done:
+            try:
+                handles.writer.close()  # EOF run_agent's input so it unwinds
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(runner_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                runner_task.cancel()
+                await asyncio.gather(runner_task, return_exceptions=True)
+        if runner_task.done() and not runner_task.cancelled():
+            exc = runner_task.exception()
+            if isinstance(exc, ConnectionResetError):
+                logger.info("connection reset by %s", peer)
+            elif exc is not None and not isinstance(exc, asyncio.CancelledError):
+                logger.error("ACP handler crashed for %s", peer, exc_info=exc)
     except asyncio.CancelledError:
-        # Propagate so aiohttp's graceful shutdown can observe it; finally still runs.
+        runner_task.cancel()
+        await asyncio.gather(runner_task, return_exceptions=True)
         raise
-    except ConnectionResetError:
-        logger.info("connection reset by %s", peer)
-    except Exception:
-        logger.exception("ACP handler crashed for %s", peer)
     finally:
         # Close the ACP writer so the acp->ws pump sees EOF and exits cleanly.
         try:
