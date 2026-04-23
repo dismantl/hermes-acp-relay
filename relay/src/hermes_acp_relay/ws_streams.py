@@ -26,12 +26,11 @@ _STREAM_LIMIT = 50 * 1024 * 1024  # matches acp.core.DEFAULT_STDIO_BUFFER_LIMIT_
 
 @dataclass
 class AdapterHandles:
-    """What the caller needs to drive run_agent and tear down cleanly."""
-
-    reader: asyncio.StreamReader    # pass as run_agent's output_stream (client -> agent)
-    writer: asyncio.StreamWriter    # pass as run_agent's input_stream  (agent -> client)
-    ws_to_acp_task: asyncio.Task    # pumps WS frames into ACP's reader
-    acp_to_ws_task: asyncio.Task    # pumps ACP's writes out as WS frames
+    reader: asyncio.StreamReader        # pass as run_agent's output_stream (client -> agent)
+    writer: asyncio.StreamWriter        # pass as run_agent's input_stream  (agent -> client)
+    bridge_writer: asyncio.StreamWriter # the pump-side socketpair half; caller must close it on teardown to release the FD
+    ws_to_acp_task: asyncio.Task        # pumps WS frames into ACP's reader
+    acp_to_ws_task: asyncio.Task        # pumps ACP's writes out as WS frames
 
 
 async def ws_to_asyncio_streams(ws: web.WebSocketResponse) -> AdapterHandles:
@@ -88,6 +87,7 @@ async def ws_to_asyncio_streams(ws: web.WebSocketResponse) -> AdapterHandles:
     return AdapterHandles(
         reader=acp_reader,
         writer=acp_writer,
+        bridge_writer=bridge_writer,
         ws_to_acp_task=ws_to_acp_task,
         acp_to_ws_task=acp_to_ws_task,
     )

@@ -81,6 +81,12 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
             for t in (handles.ws_to_acp_task, handles.acp_to_ws_task):
                 if not t.done():
                     t.cancel()
+        # Release the bridge side of the socketpair; without this the FD lingers until GC.
+        try:
+            handles.bridge_writer.close()
+            await handles.bridge_writer.wait_closed()
+        except Exception:
+            pass
         if not ws.closed:
             await ws.close()
         logger.info("client disconnected: %s", peer)
