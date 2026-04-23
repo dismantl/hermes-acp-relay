@@ -74,15 +74,20 @@ async def run(cfg: BridgeConfig) -> int:
                 stdin_task.cancel()
                 await asyncio.gather(stdin_task, return_exceptions=True)
 
-            for task in (stdin_task, stdout_task):
+            pump_exc: BaseException | None = None
+            for task, label in ((stdin_task, "stdin"), (stdout_task, "stdout")):
                 if task.done() and not task.cancelled():
                     exc = task.exception()
                     if exc and not isinstance(exc, (asyncio.CancelledError, ConnectionResetError)):
-                        logger.error("bridge task failed: %r", exc)
+                        logger.error("bridge %s pump failed: %r", label, exc)
+                        pump_exc = pump_exc or exc
 
             if not ws.closed:
                 await ws.close()
-            exit_code = _bridge_exit_code(ws, url=cfg.url, initiated_locally=stdin_closed_first)
+            if pump_exc is not None:
+                exit_code = 2
+            else:
+                exit_code = _bridge_exit_code(ws, url=cfg.url, initiated_locally=stdin_closed_first)
     logger.info("disconnected")
     return exit_code
 
