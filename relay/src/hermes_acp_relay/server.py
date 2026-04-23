@@ -17,11 +17,16 @@ logger = logging.getLogger(__name__)
 _MAX_MSG_SIZE = 50 * 1024 * 1024  # matches acp SDK's stdio buffer default
 
 # Process-wide lock serializing HermesACPAgent.prompt() calls across all
-# connections. See the implementation plan's "Known limitations #1": upstream's
-# tools/terminal_tool._approval_callback is a module-global that prompt() swaps
-# around run_in_executor. Two concurrent prompts in one process would race on
-# that global and could misroute approval dialogs between editors. Non-prompt
-# methods (initialize, new_session, cancel, …) still run concurrently.
+# connections. Hermes's prompt() path mutates a process-global approval-callback
+# hook around run_in_executor; concurrent prompts in one process race on that
+# global and can misroute approval dialogs between editors. Non-prompt methods
+# (initialize, new_session, cancel, …) still run concurrently.
+#
+# Liveness tradeoff: the lock is held for the full duration of one prompt. There
+# is no numeric timeout because legitimate agent work (tool loops, long model
+# reasoning) can exceed any sane bound. In single-user mode the recovery path
+# is: close the client; the WS drops, _handle_acp's finally cancels the lock-
+# holding task, lock releases.
 _prompt_lock = asyncio.Lock()
 
 
