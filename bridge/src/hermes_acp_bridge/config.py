@@ -9,6 +9,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "hermes-acp-bridge" / "config.toml"
@@ -55,6 +56,13 @@ def load_config(explicit_path: str | None = None) -> BridgeConfig:
     if not isinstance(url, str) or not url:
         raise ConfigError(f"{path}: 'url' is required and must be a non-empty string.")
 
+    parsed = urlparse(url)
+    if parsed.username or parsed.password:
+        raise ConfigError(
+            f"{path}: 'url' must not contain userinfo (user:pass@host); "
+            f"use the 'username' and 'password' keys instead."
+        )
+
     username = data.get("username")
     password = data.get("password")
     if (username is None) != (password is None):
@@ -69,6 +77,11 @@ def load_config(explicit_path: str | None = None) -> BridgeConfig:
         if username == "" or password == "":
             raise ConfigError(
                 f"{path}: 'username' and 'password' must be non-empty strings when set."
+            )
+        if parsed.scheme != "wss":
+            raise ConfigError(
+                f"{path}: credentials require a wss:// URL (got scheme {parsed.scheme!r}); "
+                f"refusing to send Basic auth in cleartext."
             )
 
     return BridgeConfig(url=url, username=username, password=password)
