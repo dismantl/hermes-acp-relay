@@ -56,8 +56,11 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
             output_stream=handles.reader,
             use_unstable_protocol=True,
         )
-    except (asyncio.CancelledError, ConnectionResetError):
-        pass
+    except asyncio.CancelledError:
+        # Propagate so aiohttp's graceful shutdown can observe it; finally still runs.
+        raise
+    except ConnectionResetError:
+        logger.info("connection reset by %s", peer)
     except Exception:
         logger.exception("ACP handler crashed for %s", peer)
     finally:
