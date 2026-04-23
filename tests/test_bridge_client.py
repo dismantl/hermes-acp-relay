@@ -68,6 +68,20 @@ async def test_run_returns_success_on_clean_websocket_close(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_returns_error_on_401_handshake():
+    async def handler(request):
+        return web.Response(status=401, text="unauthorized")
+
+    runner, url = await _start_test_server(handler)
+    try:
+        rc = await run(BridgeConfig(url=url, username=None, password=None))
+    finally:
+        await runner.cleanup()
+
+    assert rc == 2
+
+
+@pytest.mark.asyncio
 async def test_run_returns_error_when_stdin_pump_crashes(monkeypatch):
     async def handler(request):
         ws = web.WebSocketResponse()
