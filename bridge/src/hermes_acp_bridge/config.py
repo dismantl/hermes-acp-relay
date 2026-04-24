@@ -97,10 +97,12 @@ def load_config(explicit_path: str | None = None) -> BridgeConfig:
             raise ConfigError(
                 f"{path}: 'username' and 'password' must be non-empty strings when set."
             )
-        if parsed.scheme != "wss":
+        if parsed.scheme not in ("wss", "https"):
             raise ConfigError(
-                f"{path}: credentials require a wss:// URL (got scheme {parsed.scheme!r}); "
-                f"refusing to send Basic auth in cleartext."
+                f"{path}: credentials require a wss:// or https:// URL (got scheme "
+                f"{parsed.scheme!r}); refusing to send Basic auth in cleartext. "
+                f"aiohttp's ws_connect upgrades https:// to a TLS-protected "
+                f"WebSocket, so either scheme is fine."
             )
 
     return BridgeConfig(url=url, username=username, password=password)

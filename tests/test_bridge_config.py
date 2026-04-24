@@ -32,6 +32,33 @@ def test_load_config_rejects_ws_url_with_credentials(tmp_path):
         load_config(str(config_path))
 
 
+def test_load_config_rejects_http_url_with_credentials(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        'url = "http://example.com/acp"\n'
+        'username = "u"\n'
+        'password = "p"\n'
+    )
+
+    with pytest.raises(ConfigError, match="wss"):
+        load_config(str(config_path))
+
+
+def test_load_config_accepts_https_url_with_credentials(tmp_path):
+    # aiohttp's ws_connect upgrades https:// to a TLS-protected WebSocket, so
+    # https://host/path with credentials is as secure as wss://host/path.
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        'url = "https://example.com/acp"\n'
+        'username = "u"\n'
+        'password = "p"\n'
+    )
+
+    cfg = load_config(str(config_path))
+    assert cfg.url == "https://example.com/acp"
+    assert cfg.username == "u" and cfg.password == "p"
+
+
 def test_load_config_accepts_ws_url_without_credentials(tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text('url = "ws://localhost:8765/acp"\n')
