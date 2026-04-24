@@ -74,21 +74,25 @@ async def run(cfg: BridgeConfig) -> int:
                 stdin_task.cancel()
                 await asyncio.gather(stdin_task, return_exceptions=True)
 
-            for task in (stdin_task, stdout_task):
+            pump_exc: BaseException | None = None
+            for task, label in ((stdin_task, "stdin"), (stdout_task, "stdout")):
                 if task.done() and not task.cancelled():
                     exc = task.exception()
                     if exc and not isinstance(exc, (asyncio.CancelledError, ConnectionResetError)):
-                        logger.error("bridge task failed: %r", exc)
+                        logger.error("bridge %s pump failed: %r", label, exc)
+                        pump_exc = pump_exc or exc
 
             if not ws.closed:
                 await ws.close()
-            exit_code = _bridge_exit_code(ws, url=cfg.url, initiated_locally=stdin_closed_first)
+            if pump_exc is not None:
+                exit_code = 2
+            else:
+                exit_code = _bridge_exit_code(ws, url=cfg.url, initiated_locally=stdin_closed_first)
     logger.info("disconnected")
     return exit_code
 
 
 async def _stdin_to_ws(ws: aiohttp.ClientWebSocketResponse) -> None:
-    """Read newline-delimited JSON-RPC from stdin, send each line as a WS text frame."""
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=_MAX_MSG_SIZE)
     protocol = asyncio.StreamReaderProtocol(reader)
@@ -110,7 +114,6 @@ async def _stdin_to_ws(ws: aiohttp.ClientWebSocketResponse) -> None:
 
 
 async def _ws_to_stdout(ws: aiohttp.ClientWebSocketResponse) -> None:
-    """Receive WS text frames, write each as a line to stdout."""
     async for msg in ws:
         if msg.type == aiohttp.WSMsgType.TEXT:
             sys.stdout.write(msg.data)
@@ -138,6 +141,8 @@ def _bridge_exit_code(
         logger.error("WebSocket to %s closed with exception: %r", url, exc)
         return 2
 
+    # Locally-initiated close may finish before the peer's close frame arrives,
+    # leaving close_code unset — that's still a clean exit.
     if initiated_locally and ws.close_code is None:
         return 0
 

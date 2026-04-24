@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from aiohttp import WSCloseCode, web
+from aiohttp import WSCloseCode, WSMsgType, web
 import pytest
 
 from hermes_acp_bridge.client import _stdin_to_ws, run
@@ -65,6 +65,73 @@ async def test_run_returns_success_on_clean_websocket_close(monkeypatch):
         await runner.cleanup()
 
     assert rc == 0
+
+
+@pytest.mark.asyncio
+async def test_run_returns_error_on_401_handshake():
+    async def handler(request):
+        return web.Response(status=401, text="unauthorized")
+
+    runner, url = await _start_test_server(handler)
+    try:
+        rc = await run(BridgeConfig(url=url, username=None, password=None))
+    finally:
+        await runner.cleanup()
+
+    assert rc == 2
+
+
+@pytest.mark.asyncio
+async def test_run_returns_error_when_stdin_pump_crashes(monkeypatch):
+    async def handler(request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for msg in ws:
+            if msg.type == WSMsgType.CLOSE:
+                break
+        return ws
+
+    async def crashing_stdin_to_ws(ws):
+        raise OSError("broken pipe")
+
+    monkeypatch.setattr("hermes_acp_bridge.client._stdin_to_ws", crashing_stdin_to_ws)
+
+    runner, url = await _start_test_server(handler)
+    try:
+        rc = await run(BridgeConfig(url=url, username=None, password=None))
+    finally:
+        await runner.cleanup()
+
+    assert rc == 2
+
+
+@pytest.mark.asyncio
+async def test_run_returns_error_when_ws_to_stdout_pump_crashes(monkeypatch):
+    async def handler(request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for msg in ws:
+            if msg.type == WSMsgType.CLOSE:
+                break
+        return ws
+
+    async def crashing_ws_to_stdout(ws):
+        raise OSError("stdout gone")
+
+    async def slow_stdin_to_ws(ws):
+        while not ws.closed:
+            await asyncio.sleep(0.01)
+
+    monkeypatch.setattr("hermes_acp_bridge.client._ws_to_stdout", crashing_ws_to_stdout)
+    monkeypatch.setattr("hermes_acp_bridge.client._stdin_to_ws", slow_stdin_to_ws)
+
+    runner, url = await _start_test_server(handler)
+    try:
+        rc = await run(BridgeConfig(url=url, username=None, password=None))
+    finally:
+        await runner.cleanup()
+
+    assert rc == 2
 
 
 @pytest.mark.asyncio
