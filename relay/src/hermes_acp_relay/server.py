@@ -80,6 +80,11 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
             except asyncio.TimeoutError:
                 runner_task.cancel()
                 await asyncio.gather(runner_task, return_exceptions=True)
+            except Exception:
+                # run_agent raised during EOF/cleanup; the exception is captured
+                # on runner_task and logged by the branch below. Don't let it
+                # escape here or aiohttp will mark the handler as failed.
+                pass
         if runner_task.done() and not runner_task.cancelled():
             exc = runner_task.exception()
             if isinstance(exc, ConnectionResetError):
