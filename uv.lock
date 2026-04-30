@@ -373,6 +373,18 @@ wheels = [
 ]
 
 [[package]]
+name = "croniter"
+version = "6.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/df/de/5832661ed55107b8a09af3f0a2e71e0957226a59eb1dcf0a445cce6daf20/croniter-6.2.2.tar.gz", hash = "sha256:ba60832a5ec8e12e51b8691c3309a113d1cf6526bdf1a48150ce8ec7a532d0ab", size = 113762, upload-time = "2026-03-15T08:43:48.112Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/39/783980e78cb92c2d7bdb1fc7dbc86e94ccc6d58224d76a7f1f51b6c51e30/croniter-6.2.2-py3-none-any.whl", hash = "sha256:a5d17b1060974d36251ea4faf388233eca8acf0d09cbd92d35f4c4ac8f279960", size = 45422, upload-time = "2026-03-15T08:43:46.626Z" },
+]
+
+[[package]]
 name = "cryptography"
 version = "46.0.7"
 source = { registry = "https://pypi.org/simple" }
@@ -664,7 +676,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
-    { name = "hermes-agent", extras = ["acp"], editable = "../hermes-agent" },
+    { name = "hermes-agent", extras = ["acp"], git = "https://github.com/NousResearch/hermes-agent.git?branch=main" },
 ]
 
 [[package]]
@@ -688,10 +700,11 @@ dev = [
 
 [[package]]
 name = "hermes-agent"
-version = "0.10.0"
-source = { editable = "../hermes-agent" }
+version = "0.11.0"
+source = { git = "https://github.com/NousResearch/hermes-agent.git?branch=main#9a145406031aab0054868d27e64314e165a15806" }
 dependencies = [
     { name = "anthropic" },
+    { name = "croniter" },
     { name = "edge-tts" },
     { name = "exa-py" },
     { name = "fal-client" },
@@ -715,104 +728,6 @@ dependencies = [
 acp = [
     { name = "agent-client-protocol" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "agent-client-protocol", marker = "extra == 'acp'", specifier = ">=0.9.0,<1.0" },
-    { name = "aiohttp", marker = "extra == 'homeassistant'", specifier = ">=3.9.0,<4" },
-    { name = "aiohttp", marker = "extra == 'messaging'", specifier = ">=3.13.3,<4" },
-    { name = "aiohttp", marker = "extra == 'sms'", specifier = ">=3.9.0,<4" },
-    { name = "aiosqlite", marker = "extra == 'matrix'", specifier = ">=0.20" },
-    { name = "alibabacloud-dingtalk", marker = "extra == 'dingtalk'", specifier = ">=2.0.0" },
-    { name = "anthropic", specifier = ">=0.39.0,<1" },
-    { name = "asyncpg", marker = "extra == 'matrix'", specifier = ">=0.29" },
-    { name = "atroposlib", marker = "extra == 'rl'", git = "https://github.com/NousResearch/atropos.git?rev=c20c85256e5a45ad31edf8b7276e9c5ee1995a30" },
-    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.35.0,<2" },
-    { name = "croniter", marker = "extra == 'cron'", specifier = ">=6.0.0,<7" },
-    { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.148.0,<1" },
-    { name = "debugpy", marker = "extra == 'dev'", specifier = ">=1.8.0,<2" },
-    { name = "dingtalk-stream", marker = "extra == 'dingtalk'", specifier = ">=0.20,<1" },
-    { name = "discord-py", extras = ["voice"], marker = "extra == 'messaging'", specifier = ">=2.7.1,<3" },
-    { name = "edge-tts", specifier = ">=7.2.7,<8" },
-    { name = "elevenlabs", marker = "extra == 'tts-premium'", specifier = ">=1.0,<2" },
-    { name = "exa-py", specifier = ">=2.9.0,<3" },
-    { name = "fal-client", specifier = ">=0.13.1,<1" },
-    { name = "fastapi", marker = "extra == 'rl'", specifier = ">=0.104.0,<1" },
-    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.104.0,<1" },
-    { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.0.0,<2" },
-    { name = "fire", specifier = ">=0.7.1,<1" },
-    { name = "firecrawl-py", specifier = ">=4.16.0,<5" },
-    { name = "hermes-agent", extras = ["acp"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["acp"], marker = "extra == 'termux'" },
-    { name = "hermes-agent", extras = ["bedrock"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["cli"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["cli"], marker = "extra == 'termux'" },
-    { name = "hermes-agent", extras = ["cron"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["cron"], marker = "extra == 'termux'" },
-    { name = "hermes-agent", extras = ["daytona"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["dev"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["dingtalk"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["feishu"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["homeassistant"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["honcho"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["honcho"], marker = "extra == 'termux'" },
-    { name = "hermes-agent", extras = ["matrix"], marker = "sys_platform == 'linux' and extra == 'all'" },
-    { name = "hermes-agent", extras = ["mcp"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["mcp"], marker = "extra == 'termux'" },
-    { name = "hermes-agent", extras = ["messaging"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["mistral"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["modal"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["pty"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["pty"], marker = "extra == 'termux'" },
-    { name = "hermes-agent", extras = ["slack"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["sms"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["tts-premium"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["voice"], marker = "extra == 'all'" },
-    { name = "hermes-agent", extras = ["web"], marker = "extra == 'all'" },
-    { name = "honcho-ai", marker = "extra == 'honcho'", specifier = ">=2.0.1,<3" },
-    { name = "httpx", extras = ["socks"], specifier = ">=0.28.1,<1" },
-    { name = "jinja2", specifier = ">=3.1.5,<4" },
-    { name = "lark-oapi", marker = "extra == 'feishu'", specifier = ">=1.5.3,<2" },
-    { name = "markdown", marker = "extra == 'matrix'", specifier = ">=3.6,<4" },
-    { name = "mautrix", extras = ["encryption"], marker = "extra == 'matrix'", specifier = ">=0.20,<1" },
-    { name = "mcp", marker = "extra == 'dev'", specifier = ">=1.2.0,<2" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2.0,<2" },
-    { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=2.3.0,<3" },
-    { name = "modal", marker = "extra == 'modal'", specifier = ">=1.0.0,<2" },
-    { name = "numpy", marker = "extra == 'voice'", specifier = ">=1.24.0,<3" },
-    { name = "openai", specifier = ">=2.21.0,<3" },
-    { name = "parallel-web", specifier = ">=0.4.2,<1" },
-    { name = "prompt-toolkit", specifier = ">=3.0.52,<4" },
-    { name = "ptyprocess", marker = "sys_platform != 'win32' and extra == 'pty'", specifier = ">=0.7.0,<1" },
-    { name = "pydantic", specifier = ">=2.12.5,<3" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.12.0,<3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2,<10" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.3.0,<2" },
-    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.0,<4" },
-    { name = "python-dotenv", specifier = ">=1.2.1,<2" },
-    { name = "python-telegram-bot", extras = ["webhooks"], marker = "extra == 'messaging'", specifier = ">=22.6,<23" },
-    { name = "python-telegram-bot", extras = ["webhooks"], marker = "extra == 'termux'", specifier = ">=22.6,<23" },
-    { name = "pywinpty", marker = "sys_platform == 'win32' and extra == 'pty'", specifier = ">=2.0.0,<3" },
-    { name = "pyyaml", specifier = ">=6.0.2,<7" },
-    { name = "qrcode", marker = "extra == 'dingtalk'", specifier = ">=7.0,<8" },
-    { name = "qrcode", marker = "extra == 'feishu'", specifier = ">=7.0,<8" },
-    { name = "qrcode", marker = "extra == 'messaging'", specifier = ">=7.0,<8" },
-    { name = "requests", specifier = ">=2.33.0,<3" },
-    { name = "rich", specifier = ">=14.3.3,<15" },
-    { name = "simple-term-menu", marker = "extra == 'cli'", specifier = ">=1.0,<2" },
-    { name = "slack-bolt", marker = "extra == 'messaging'", specifier = ">=1.18.0,<2" },
-    { name = "slack-bolt", marker = "extra == 'slack'", specifier = ">=1.18.0,<2" },
-    { name = "slack-sdk", marker = "extra == 'messaging'", specifier = ">=3.27.0,<4" },
-    { name = "slack-sdk", marker = "extra == 'slack'", specifier = ">=3.27.0,<4" },
-    { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.4.6,<1" },
-    { name = "tenacity", specifier = ">=9.1.4,<10" },
-    { name = "tinker", marker = "extra == 'rl'", git = "https://github.com/thinking-machines-lab/tinker.git?rev=30517b667f18a3dfb7ef33fb56cf686d5820ba2b" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'rl'", specifier = ">=0.24.0,<1" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'web'", specifier = ">=0.24.0,<1" },
-    { name = "wandb", marker = "extra == 'rl'", specifier = ">=0.15.0,<1" },
-    { name = "yc-bench", marker = "python_full_version >= '3.12' and extra == 'yc-bench'", git = "https://github.com/collinear-ai/yc-bench.git?rev=bfb0c88062450f46341bd9a5298903fc2e952a5c" },
-]
-provides-extras = ["modal", "daytona", "dev", "messaging", "cron", "slack", "matrix", "cli", "tts-premium", "voice", "pty", "honcho", "mcp", "homeassistant", "sms", "acp", "mistral", "bedrock", "termux", "dingtalk", "feishu", "web", "rl", "yc-bench", "all"]
 
 [[package]]
 name = "httpcore"
@@ -1594,6 +1509,18 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dateutil"
+version = "2.9.0.post0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1683,6 +1610,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/67/cae617f1351490c25a4b8ac3b8b63a4dda609295d8222bad12242dfdc629/rich-14.3.4.tar.gz", hash = "sha256:817e02727f2b25b40ef56f5aa2217f400c8489f79ca8f46ea2b70dd5e14558a9", size = 230524, upload-time = "2026-04-11T02:57:45.419Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/76/6d163cfac87b632216f71879e6b2cf17163f773ff59c00b5ff4900a80fa3/rich-14.3.4-py3-none-any.whl", hash = "sha256:07e7adb4690f68864777b1450859253bed81a99a31ac321ac1817b2313558952", size = 310480, upload-time = "2026-04-11T02:57:47.484Z" },
+]
+
+[[package]]
+name = "six"
+version = "1.17.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
 ]
 
 [[package]]

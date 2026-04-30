@@ -1,17 +1,16 @@
 # hermes-acp-relay
 
-Path 3 from `Hermes ACP Over Network Analysis` — a WebSocket relay that exposes
-[`hermes-agent`](../hermes-agent)'s ACP adapter over a network, without
-modifying upstream Hermes.
+WebSocket relay and stdio bridge for exposing `hermes-agent`'s ACP adapter over
+a private network, without modifying upstream Hermes.
 
 Two packages in one repo because they run on different machines:
 
-- **`hermes-acp-relay`** (remote, e.g. home-lab box) — aiohttp WebSocket server
-  wrapping `HermesACPAgent`. One instance per WS connection. Binds to a
+- **`hermes-acp-relay`** (server) — aiohttp WebSocket server wrapping
+  `HermesACPAgent`. One instance per WS connection. Binds to a
   non-public interface.
-- **`hermes-acp-bridge`** (laptop) — stdio ↔ WebSocket pump. Obsidian Agent
+- **`hermes-acp-bridge`** (client) — stdio ↔ WebSocket pump. Obsidian Agent
   Client (OAC) and other stdio-only ACP clients spawn it as their "agent
-  command"; it proxies ACP JSON-RPC to the remote relay.
+  command"; it proxies ACP JSON-RPC to the relay server.
 
 Auth and TLS are the reverse proxy's job. This repo assumes a proxy
 (Pangolin, Caddy, Traefik, …) terminates TLS and enforces HTTP Basic auth or
@@ -19,18 +18,17 @@ similar on the WS upgrade request. The relay itself has zero auth code.
 
 ## Install
 
-Requires Python ≥ 3.11 and a local checkout of `hermes-agent` at
-`../hermes-agent` (relative to this repo).
+Requires Python ≥ 3.11. The workspace fetches `hermes-agent` from its public
+GitHub repository.
 
 ```sh
-# in ~/code/hermes-acp-relay
-uv sync
+# from this repo checkout
+uv sync --all-packages
 ```
 
-This installs both workspace members and the local editable `hermes-agent`
-(with the `[acp]` extra).
+This installs both workspace members and `hermes-agent` with the `[acp]` extra.
 
-## Run — remote side (home-lab)
+## Run — server side
 
 ```sh
 uv run hermes-acp-relay --host 127.0.0.1 --port 8765
@@ -44,7 +42,7 @@ Binding notes:
 - The relay has **no authentication**. Never expose it directly to the public
   internet — the proxy is the only gatekeeper.
 
-### Reverse-proxy config (Pangolin example)
+### Reverse-proxy config
 
 - **Target:** `http://<relay-host>:8765/acp`
 - **Auth:** HTTP Basic. Generate a password: `openssl rand -base64 32`.
@@ -55,7 +53,7 @@ Binding notes:
 The same shape works for Caddy, Traefik, nginx; only the config syntax
 differs.
 
-## Run — laptop side
+## Run — client side
 
 ```sh
 uv run hermes-acp-bridge
@@ -65,7 +63,7 @@ Reads `~/.config/hermes-acp-bridge/config.toml` (override with `-c PATH` or
 `HERMES_BRIDGE_CONFIG`). Example:
 
 ```toml
-url = "wss://hermes.mydomain.example/acp"
+url = "wss://relay.example.com/acp"
 username = "hermes-acp"
 password = "<paste the password you set in the proxy>"
 ```
@@ -76,33 +74,29 @@ Make it private: `chmod 600 ~/.config/hermes-acp-bridge/config.toml`.
 
 Add a custom agent in OAC:
 
-- **Command:** `hermes-acp-bridge` (or absolute path, e.g. `/home/you/.local/bin/hermes-acp-bridge`)
+- **Command:** `hermes-acp-bridge` (or an absolute path to the executable)
 - **Args:** (none)
 
-No credentials go into OAC's config; they're all in the bridge's config
-file outside Obsidian's vault.
+No credentials go into OAC's config; they're all in the bridge's local config
+file.
 
 ## Architecture
 
 ```
-[OAC in Obsidian on laptop]
+[OAC on client]
         | stdio (ACP JSON-RPC, line-delimited)
         v
-[hermes-acp-bridge]                 ← this repo, laptop-side
+[hermes-acp-bridge]                 ← this repo, client-side
         | wss:// (HTTP Basic auth, TLS terminated by proxy)
         v
-[Reverse proxy]                     ← user's existing infra
+[Reverse proxy]                     ← deployment environment
         | ws:// (plain HTTP on the internal network)
         v
-[hermes-acp-relay]                  ← this repo, remote-side
+[hermes-acp-relay]                  ← this repo, server-side
         |
         v
 [HermesACPAgent]                    ← upstream hermes-agent, unmodified
 ```
-
-See `../../Personal/1 Projects/Hermes Remote ACP/Path 3 Implementation Plan.md`
-for the full design notes (concurrency model, session-resume behaviour,
-known limitations).
 
 ## Known limitations
 

@@ -1,14 +1,14 @@
 [project]
 name = "hermes-acp-relay-workspace"
 version = "0.1.0"
-description = "Path 3 — WebSocket relay + stdio bridge for Hermes ACP"
+description = "WebSocket relay + stdio bridge for Hermes ACP"
 requires-python = ">=3.11"
 
 [tool.uv.workspace]
 members = ["relay", "bridge"]
 
 [tool.uv.sources]
-hermes-agent = { path = "../hermes-agent", editable = true }
+hermes-agent = { git = "https://github.com/NousResearch/hermes-agent.git", branch = "main" }
 
 [dependency-groups]
 dev = [

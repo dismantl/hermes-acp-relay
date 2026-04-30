@@ -1,7 +1,7 @@
 [project]
 name = "hermes-acp-bridge"
 version = "0.1.0"
-description = "stdio <-> WebSocket bridge for Hermes ACP relay (laptop side)"
+description = "stdio <-> WebSocket bridge for Hermes ACP relay (client side)"
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.9",
