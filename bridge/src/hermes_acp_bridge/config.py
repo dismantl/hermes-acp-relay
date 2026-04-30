@@ -1,7 +1,7 @@
 """Config loader for hermes-acp-bridge.
 
 Reads a TOML file with the relay URL and HTTP Basic auth credentials.
-Kept outside the Obsidian vault so it doesn't accidentally sync.
+Kept in a dedicated local config file so it doesn't accidentally sync.
 """
 from __future__ import annotations
 

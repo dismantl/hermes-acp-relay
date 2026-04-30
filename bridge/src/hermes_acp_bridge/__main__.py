@@ -22,7 +22,7 @@ def _setup_logging(level: str) -> None:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hermes-acp-bridge",
-        description="Bridge Obsidian Agent Client's stdio ACP to a remote WebSocket relay.",
+        description="Bridge Obsidian Agent Client's stdio ACP to a relay server.",
     )
     parser.add_argument(
         "-c", "--config",

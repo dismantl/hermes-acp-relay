@@ -2,7 +2,7 @@
 
 OAC spawns this as its "agent command"; stdin/stdout carry ACP JSON-RPC
 to/from OAC, and we proxy each line to/from a WebSocket text frame against
-the remote relay.
+the relay server.
 """
 from __future__ import annotations
 
