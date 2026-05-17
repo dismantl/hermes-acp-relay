@@ -427,43 +427,16 @@ async def test_streaming_patch_session_update_accepts_kwargs(monkeypatch):
     fake_conn = _FakeConn()
     _install_fake_hermes_parent(monkeypatch, fake_agent, fake_conn)
 
-    from hermes_acp_relay.server import _build_serialized_agent_class
-
-    agent_cls = _build_serialized_agent_class()
-    serialized = agent_cls()
-
-    # Drive a prompt to install the patch, but capture the wrapper before it
-    # tears down by hooking the install step.
-    captured = {}
-    original_install = serialized._install_stream_patch
-
-    def spy_install(args, kwargs):
-        state = original_install(args, kwargs)
-        captured["session_update"] = fake_conn.session_update
-        return state
-
-    serialized._install_stream_patch = spy_install
-
-    # While the prompt is mid-flight we want to invoke the wrapper directly
-    # with kwargs. Easiest: drive prompt, but inside the fake parent's
-    # prompt() call our patched wrapper at the kwarg shape and assert it
-    # doesn't raise.
+    # Swap in a parent whose prompt() fires a kwarg-shaped session_update
+    # against self._conn while a prompt is in flight, simulating a
+    # concurrent _send_available_commands_update landing inside the patch
+    # window. The kwarg call must reach the underlying conn without raising.
     fired = {"kwarg_call_ok": False, "exc": None}
-
-    # Use a one-shot fake parent that, while a prompt is running, fires a
-    # kwarg-shaped session_update against the wrapper (simulating a
-    # concurrent _send_available_commands_update). We do this by replacing
-    # the fake parent's prompt to add the extra call before run_in_executor.
-    import asyncio as _asyncio
-
     fake_acp_adapter_server = sys.modules["acp_adapter.server"]
     OrigParent = fake_acp_adapter_server.HermesACPAgent
 
     class KwargProbeParent(OrigParent):
         async def prompt(self, prompt_blocks, session_id, **kwargs):
-            # Patch is installed by our subclass before super().prompt runs.
-            # Fire a kwarg-shape session_update through self._conn — this
-            # exercises our wrapper directly.
             update = _types.SimpleNamespace(
                 session_update="available_commands_update",
                 content=None,
@@ -479,7 +452,8 @@ async def test_streaming_patch_session_update_accepts_kwargs(monkeypatch):
 
     fake_acp_adapter_server.HermesACPAgent = KwargProbeParent
 
-    # Rebuild the serialized class against the swapped parent.
+    from hermes_acp_relay.server import _build_serialized_agent_class
+
     agent_cls = _build_serialized_agent_class()
     serialized = agent_cls()
     await serialized.prompt([], "session-1")
