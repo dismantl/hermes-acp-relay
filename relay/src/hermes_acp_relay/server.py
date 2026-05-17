@@ -81,6 +81,11 @@ def _build_serialized_agent_class():
 
             agent = getattr(state, "agent", None)
             if agent is None or not hasattr(agent, "run_conversation"):
+                logger.warning(
+                    "stream patch: agent missing run_conversation on session %s; "
+                    "falling back to non-streaming",
+                    session_id,
+                )
                 return None
 
             conn = self._conn
@@ -107,6 +112,11 @@ def _build_serialized_agent_class():
 
                 message_cb = getattr(agent, "message_callback", None)
                 if message_cb is None:
+                    logger.warning(
+                        "stream patch: agent.message_callback unset on session %s; "
+                        "falling back to non-streaming",
+                        session_id,
+                    )
                     return original_run(*ra, **rkw)
 
                 streamed = [False]
@@ -115,10 +125,10 @@ def _build_serialized_agent_class():
                     if isinstance(text, str) and text:
                         _flag[0] = True
                         logger.debug("stream delta: %d chars", len(text))
-                    try:
-                        _cb(text)
-                    except Exception:
-                        logger.debug("stream callback raised", exc_info=True)
+                    # _cb here is make_message_cb's _message, which calls
+                    # events._send_update — that already swallows its own
+                    # exceptions, so we don't wrap.
+                    _cb(text)
 
                 rkw["stream_callback"] = wrapped_cb
                 result = original_run(*ra, **rkw)
@@ -126,10 +136,32 @@ def _build_serialized_agent_class():
                     arm["armed"] = True
                 return result
 
-            async def patched_session_update(s_id, update, _orig=original_send,
-                                              _arm=arm, _our_sid=session_id):
+            # Match upstream's session_update signature exactly. Two call
+            # shapes exist in acp_adapter/server.py: positional (:605, :741)
+            # and keyword (:445 _replay_session_history, :780-786
+            # _send_available_commands_update). Both can land here while the
+            # patch is installed because non-prompt ACP methods run
+            # concurrently with prompts (only prompts hold _prompt_lock).
+            #
+            # Drop strategy is by ordinal, not by content: the first
+            # agent_message_chunk for our session_id seen AFTER the executor
+            # returns is upstream's tail emit at acp_adapter/server.py:739-741.
+            # The race window for misfiring is narrow — only a same-session
+            # session/load replay (_replay_session_history at
+            # acp_adapter/server.py:422-449) that fires between
+            # arm["armed"] = True and the tail emit could trip us. Content
+            # matching would be more robust but fragile to upstream
+            # post-processing (think-block stripping, scrubber tail flush,
+            # etc.).
+            async def patched_session_update(
+                session_id,
+                update,
+                _orig=original_send,
+                _arm=arm,
+                _our_sid=session_id,
+            ):
                 if (
-                    s_id == _our_sid
+                    session_id == _our_sid
                     and _arm["armed"]
                     and not _arm["consumed"]
                     and not _arm["caller_owned_stream"]
@@ -137,7 +169,7 @@ def _build_serialized_agent_class():
                 ):
                     _arm["consumed"] = True
                     return
-                return await _orig(s_id, update)
+                return await _orig(session_id, update)
 
             agent.run_conversation = patched_run
             conn.session_update = patched_session_update

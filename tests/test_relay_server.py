@@ -399,14 +399,100 @@ async def test_streaming_patch_restores_run_conversation_after_prompt(monkeypatc
     serialized = agent_cls()
 
     # _FakeAgent has run_conversation defined on the class, so no instance
-    # attr exists at first.
+    # attr exists at first. Same for _FakeConn.session_update.
     assert "run_conversation" not in fake_agent.__dict__
+    assert "session_update" not in fake_conn.__dict__
 
     await serialized.prompt([], "session-1")
 
-    # After the turn, the patch must be torn down.
+    # After the turn, BOTH patches must be torn down — otherwise the next
+    # WS request reusing this conn would keep the wrapper installed past
+    # its intended lifetime.
     assert "run_conversation" not in fake_agent.__dict__, \
         "wrapper left an instance-attr patch on agent.run_conversation"
+    assert "session_update" not in fake_conn.__dict__, \
+        "wrapper left an instance-attr patch on conn.session_update"
+
+
+@pytest.mark.asyncio
+async def test_streaming_patch_session_update_accepts_kwargs(monkeypatch):
+    """Regression: upstream calls self._conn.session_update with keyword args
+    in at least two places (acp_adapter/server.py:445 _replay_session_history,
+    :780-786 _send_available_commands_update). Those can fire concurrently
+    with a prompt because non-prompt ACP methods don't hold _prompt_lock.
+    Our wrapper must accept the keyword form without TypeError."""
+    import types as _types
+
+    fake_agent = _FakeAgent(deltas=("a",), final_response="a")
+    fake_conn = _FakeConn()
+    _install_fake_hermes_parent(monkeypatch, fake_agent, fake_conn)
+
+    from hermes_acp_relay.server import _build_serialized_agent_class
+
+    agent_cls = _build_serialized_agent_class()
+    serialized = agent_cls()
+
+    # Drive a prompt to install the patch, but capture the wrapper before it
+    # tears down by hooking the install step.
+    captured = {}
+    original_install = serialized._install_stream_patch
+
+    def spy_install(args, kwargs):
+        state = original_install(args, kwargs)
+        captured["session_update"] = fake_conn.session_update
+        return state
+
+    serialized._install_stream_patch = spy_install
+
+    # While the prompt is mid-flight we want to invoke the wrapper directly
+    # with kwargs. Easiest: drive prompt, but inside the fake parent's
+    # prompt() call our patched wrapper at the kwarg shape and assert it
+    # doesn't raise.
+    fired = {"kwarg_call_ok": False, "exc": None}
+
+    # Use a one-shot fake parent that, while a prompt is running, fires a
+    # kwarg-shaped session_update against the wrapper (simulating a
+    # concurrent _send_available_commands_update). We do this by replacing
+    # the fake parent's prompt to add the extra call before run_in_executor.
+    import asyncio as _asyncio
+
+    fake_acp_adapter_server = sys.modules["acp_adapter.server"]
+    OrigParent = fake_acp_adapter_server.HermesACPAgent
+
+    class KwargProbeParent(OrigParent):
+        async def prompt(self, prompt_blocks, session_id, **kwargs):
+            # Patch is installed by our subclass before super().prompt runs.
+            # Fire a kwarg-shape session_update through self._conn — this
+            # exercises our wrapper directly.
+            update = _types.SimpleNamespace(
+                session_update="available_commands_update",
+                content=None,
+            )
+            try:
+                await self._conn.session_update(
+                    session_id=session_id, update=update
+                )
+                fired["kwarg_call_ok"] = True
+            except Exception as e:
+                fired["exc"] = e
+            return await OrigParent.prompt(self, prompt_blocks, session_id, **kwargs)
+
+    fake_acp_adapter_server.HermesACPAgent = KwargProbeParent
+
+    # Rebuild the serialized class against the swapped parent.
+    agent_cls = _build_serialized_agent_class()
+    serialized = agent_cls()
+    await serialized.prompt([], "session-1")
+
+    assert fired["exc"] is None, \
+        f"patched_session_update raised on kwarg call: {fired['exc']!r}"
+    assert fired["kwarg_call_ok"], "kwarg-shape call did not complete"
+
+    # The kwarg-shaped non-agent_message_chunk update should have been
+    # passed through to the underlying conn.
+    kinds = [k for (_sid, k, _t) in fake_conn.updates]
+    assert "available_commands_update" in kinds, \
+        f"kwarg-shaped pass-through update never reached conn: {kinds!r}"
 
 
 @pytest.mark.asyncio
