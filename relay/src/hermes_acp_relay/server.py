@@ -37,7 +37,162 @@ def _build_serialized_agent_class():
     class SerializedHermesACPAgent(HermesACPAgent):
         async def prompt(self, *args, **kwargs):
             async with _prompt_lock:
-                return await super().prompt(*args, **kwargs)
+                patch_state = self._install_stream_patch(args, kwargs)
+                try:
+                    return await super().prompt(*args, **kwargs)
+                finally:
+                    if patch_state is not None:
+                        self._uninstall_stream_patch(*patch_state)
+
+        # --- streaming patch ---------------------------------------------------
+        #
+        # Upstream's prompt() runs the agent non-streaming and emits ONE
+        # agent_message_chunk holding the full final_response after the turn
+        # ends. For voice (TTS), that means audio can't start until the LLM
+        # finishes — blowing the 2-4s latency budget. AIAgent.run_conversation
+        # actually accepts a stream_callback that fires per token (run_agent.py
+        # ~10141), but upstream's acp_adapter.server.prompt() never passes one.
+        #
+        # We close the gap by, for the duration of one prompt:
+        #   1. monkey-patch agent.run_conversation to inject a stream_callback
+        #      that forwards deltas to the message_callback upstream's prompt()
+        #      already wired at acp_adapter/server.py:637 (which marshals from
+        #      the executor thread to the loop via run_coroutine_threadsafe).
+        #   2. monkey-patch self._conn.session_update so the tail-end emit at
+        #      acp_adapter/server.py:739-741 is dropped — exactly one
+        #      agent_message_chunk for our session_id, fired after the
+        #      run_conversation that produced any stream output. Other update
+        #      types (tool progress, thinking, history replay) pass through,
+        #      and auto-titling (lines 726-738) still sees final_response.
+        def _install_stream_patch(self, args, kwargs):
+            session_id = kwargs.get("session_id")
+            if session_id is None and len(args) >= 2:
+                session_id = args[1]
+            if session_id is None or self._conn is None:
+                return None
+
+            try:
+                state = self.session_manager.get_session(session_id)
+            except Exception:
+                logger.debug("stream patch: session lookup failed", exc_info=True)
+                return None
+            if state is None:
+                return None
+
+            agent = getattr(state, "agent", None)
+            if agent is None or not hasattr(agent, "run_conversation"):
+                logger.warning(
+                    "stream patch: agent missing run_conversation on session %s; "
+                    "falling back to non-streaming",
+                    session_id,
+                )
+                return None
+
+            conn = self._conn
+            had_run_attr = "run_conversation" in agent.__dict__
+            original_run = agent.run_conversation
+            had_send_attr = "session_update" in conn.__dict__
+            original_send = conn.session_update
+
+            # Per-prompt state shared between the run wrapper (executor thread)
+            # and the session_update wrapper (event loop). "armed" stays False
+            # while streaming chunks flow so message_cb's emissions pass through;
+            # it flips True only AFTER run_conversation returns, so the very
+            # next agent_message_chunk for our session_id — the tail-end emit
+            # at acp_adapter/server.py:739-741 — is dropped exactly once.
+            arm = {"armed": False, "consumed": False, "caller_owned_stream": False}
+
+            def patched_run(*ra, **rkw):
+                caller_provided = rkw.get("stream_callback") is not None
+                if caller_provided:
+                    # Caller drove its own streaming; don't interfere with
+                    # delivery and don't suppress the tail emit.
+                    arm["caller_owned_stream"] = True
+                    return original_run(*ra, **rkw)
+
+                message_cb = getattr(agent, "message_callback", None)
+                if message_cb is None:
+                    logger.warning(
+                        "stream patch: agent.message_callback unset on session %s; "
+                        "falling back to non-streaming",
+                        session_id,
+                    )
+                    return original_run(*ra, **rkw)
+
+                streamed = [False]
+
+                def wrapped_cb(text, _cb=message_cb, _flag=streamed):
+                    if isinstance(text, str) and text:
+                        _flag[0] = True
+                        logger.debug("stream delta: %d chars", len(text))
+                    # _cb here is make_message_cb's _message, which calls
+                    # events._send_update — that already swallows its own
+                    # exceptions, so we don't wrap.
+                    _cb(text)
+
+                rkw["stream_callback"] = wrapped_cb
+                result = original_run(*ra, **rkw)
+                if streamed[0]:
+                    arm["armed"] = True
+                return result
+
+            # Match upstream's session_update signature exactly. Two call
+            # shapes exist in acp_adapter/server.py: positional (:605, :741)
+            # and keyword (:445 _replay_session_history, :780-786
+            # _send_available_commands_update). Both can land here while the
+            # patch is installed because non-prompt ACP methods run
+            # concurrently with prompts (only prompts hold _prompt_lock).
+            #
+            # Drop strategy is by ordinal, not by content: the first
+            # agent_message_chunk for our session_id seen AFTER the executor
+            # returns is upstream's tail emit at acp_adapter/server.py:739-741.
+            # The race window for misfiring is narrow — only a same-session
+            # session/load replay (_replay_session_history at
+            # acp_adapter/server.py:422-449) that fires between
+            # arm["armed"] = True and the tail emit could trip us. Content
+            # matching would be more robust but fragile to upstream
+            # post-processing (think-block stripping, scrubber tail flush,
+            # etc.).
+            async def patched_session_update(
+                session_id,
+                update,
+                _orig=original_send,
+                _arm=arm,
+                _our_sid=session_id,
+            ):
+                if (
+                    session_id == _our_sid
+                    and _arm["armed"]
+                    and not _arm["consumed"]
+                    and not _arm["caller_owned_stream"]
+                    and getattr(update, "session_update", None) == "agent_message_chunk"
+                ):
+                    _arm["consumed"] = True
+                    return
+                return await _orig(session_id, update)
+
+            agent.run_conversation = patched_run
+            conn.session_update = patched_session_update
+            return (agent, original_run, had_run_attr,
+                    conn, original_send, had_send_attr)
+
+        @staticmethod
+        def _uninstall_stream_patch(agent, original_run, had_run_attr,
+                                    conn, original_send, had_send_attr):
+            if had_run_attr:
+                agent.run_conversation = original_run
+            else:
+                try:
+                    del agent.run_conversation
+                except AttributeError:
+                    pass
+            if had_send_attr:
+                conn.session_update = original_send
+            else:
+                try:
+                    del conn.session_update
+                except AttributeError:
+                    pass
 
     return SerializedHermesACPAgent
 
