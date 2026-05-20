@@ -6,7 +6,10 @@ per-process semantics of `hermes acp` today, without the process spawn.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
+from pathlib import Path
+from typing import Callable, Optional
 
 from aiohttp import web
 
@@ -15,6 +18,76 @@ from .ws_streams import ws_to_asyncio_streams
 logger = logging.getLogger(__name__)
 
 _MAX_MSG_SIZE = 50 * 1024 * 1024  # matches acp SDK's stdio buffer default
+
+# ---------------------------------------------------------------------------
+# Per-WS profile override
+#
+# The relay serves multiple ACP consumers (Obsidian Agent Client, hermes-
+# acp-bridge, the V2 voice agent) from the same process. Each consumer may
+# want different Hermes-side behavior — most notably, the voice agent wants
+# a different Honcho memory policy than the text channels (see acab-ansible
+# voice plan + Honcho policy layer redesign).
+#
+# Approach: a ContextVar holds an optional profile-home override per
+# asyncio.Task; the /acp/<profile-suffix> URL route sets it before the
+# agent is instantiated; a shim wrapped around hermes_constants.get_hermes_home
+# returns the override (when set) or the default. Hermes runtime resolves
+# get_hermes_home() per-call in the profile-state code paths the redesign
+# cares about (memory manager, honcho.json reader, skill discovery, config,
+# plugins, AIAgent), so the override flows through.
+#
+# Caveat: ContextVars are NOT automatically propagated to executor threads
+# (loop.run_in_executor). If Hermes' upstream prompt() reads get_hermes_home()
+# inside an executor, that read sees the default profile, not the override.
+# The Phase 0 audit (see acab-ansible voice plan) found no executor-thread
+# reads in the ACP path that would matter for the Honcho-policy use case,
+# but this is the known limitation. Audit follow-up if a profile-specific
+# leak is ever observed.
+_HERMES_HOME_OVERRIDE: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar(
+    "hermes_home_override", default=None
+)
+
+# Captured at install_profile_override_shim() time so the route handler can
+# compute sub-profile paths from the default base without recursing through
+# the patched function.
+_ORIGINAL_GET_HERMES_HOME: Optional[Callable[[], Path]] = None
+
+# Suffix shape allowed by /acp/<suffix>: lowercase letter start, then
+# lowercase letters / digits / hyphens. Excludes anything that could be
+# interpreted as a path component (`.`, `/`, `..`). Combined with the
+# resolve() + relative_to() check in the handler, this prevents
+# URL-encoded traversal and symlink escapes.
+_PROFILE_SUFFIX_PATTERN = r"[a-z][a-z0-9-]*"
+
+
+def install_profile_override_shim() -> None:
+    """Patch hermes_constants.get_hermes_home to consult _HERMES_HOME_OVERRIDE.
+
+    Must be called AFTER the Hermes environment is bootstrapped (env loaded,
+    HERMES_HOME resolved) and BEFORE any module that does
+    `from hermes_constants import get_hermes_home` is imported. Calling this
+    in __main__.main(), immediately after _load_hermes_env() and before
+    `from .server import create_app`, satisfies both constraints — at that
+    point hermes_constants has been imported (by _load_hermes_env) but no
+    downstream hermes module has rebound the name.
+
+    Idempotent: calling twice is a no-op.
+    """
+    import hermes_constants  # type: ignore[import-not-found]
+
+    global _ORIGINAL_GET_HERMES_HOME
+    if _ORIGINAL_GET_HERMES_HOME is not None:
+        # Already installed.
+        return
+    _ORIGINAL_GET_HERMES_HOME = hermes_constants.get_hermes_home
+
+    def get_hermes_home_with_override() -> Path:
+        override = _HERMES_HOME_OVERRIDE.get()
+        if override is not None:
+            return override
+        return _ORIGINAL_GET_HERMES_HOME()  # type: ignore[misc]
+
+    hermes_constants.get_hermes_home = get_hermes_home_with_override
 
 # Process-wide lock serializing HermesACPAgent.prompt() calls across all
 # connections. Hermes's prompt() path mutates a process-global approval-callback
@@ -347,14 +420,77 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+async def _handle_acp_with_profile_override(request: web.Request) -> web.WebSocketResponse:
+    """WS handler for /acp/<profile-suffix> — loads a Hermes sub-profile.
+
+    The sub-profile must exist at ${HERMES_HOME}/profiles/<suffix>/ (a
+    `gateway: false` profile dir as provisioned by acab-ansible's hermes
+    role). Returns 404 if the directory is missing. Sets the per-WS
+    _HERMES_HOME_OVERRIDE ContextVar for the lifetime of this WS connection
+    and delegates to _handle_acp; the shim around hermes_constants.get_hermes_home
+    routes profile-state reads to the override path.
+    """
+    suffix = request.match_info["profile_suffix"]
+
+    if _ORIGINAL_GET_HERMES_HOME is None:
+        # install_profile_override_shim() should have been called by main()
+        # before create_app() ran. Defensive log + 500 if we somehow ended
+        # up here without it.
+        logger.error(
+            "profile override requested but shim is not installed; "
+            "call install_profile_override_shim() before create_app()"
+        )
+        raise web.HTTPInternalServerError(reason="profile shim not installed")
+
+    base = Path(_ORIGINAL_GET_HERMES_HOME())
+    profiles_root = (base / "profiles").resolve()
+    candidate = (profiles_root / suffix).resolve()
+
+    # Defense in depth: the candidate's resolved path must live under
+    # profiles_root. The URL regex already restricts the suffix shape;
+    # this catches symlink-based escape attempts where the regex-valid
+    # directory name points outside the tree.
+    try:
+        candidate.relative_to(profiles_root)
+    except ValueError:
+        logger.warning(
+            "rejecting profile suffix that resolves outside profiles_root: "
+            "%s (resolved to %s, profiles_root=%s)",
+            suffix, candidate, profiles_root,
+        )
+        raise web.HTTPNotFound(reason=f"unknown profile: {suffix}")
+
+    if not candidate.is_dir():
+        raise web.HTTPNotFound(reason=f"unknown profile: {suffix}")
+
+    token = _HERMES_HOME_OVERRIDE.set(candidate)
+    try:
+        logger.info(
+            "loading sub-profile %s (home=%s) for client %s",
+            suffix, candidate, request.remote,
+        )
+        return await _handle_acp(request)
+    finally:
+        _HERMES_HOME_OVERRIDE.reset(token)
+
+
 async def _handle_health(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
 def create_app() -> web.Application:
-    """Construct the aiohttp application. Caller must have bootstrapped Hermes first."""
+    """Construct the aiohttp application. Caller must have bootstrapped Hermes
+    and called install_profile_override_shim() first.
+    """
     app = web.Application()
     app["agent_cls"] = _build_serialized_agent_class()
     app.router.add_get("/health", _handle_health)
     app.router.add_get("/acp", _handle_acp)
+    # Per-WS profile-switching route. URL suffix maps to a sub-profile
+    # directory under ${HERMES_HOME}/profiles/. See the _HERMES_HOME_OVERRIDE
+    # docstring at module top for the design.
+    app.router.add_get(
+        "/acp/{profile_suffix:" + _PROFILE_SUFFIX_PATTERN + "}",
+        _handle_acp_with_profile_override,
+    )
     return app

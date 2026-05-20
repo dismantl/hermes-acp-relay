@@ -64,10 +64,22 @@ def main(argv: list[str] | None = None) -> int:
         logger.exception("Failed to bootstrap Hermes environment — is hermes-agent installed?")
         return 1
 
+    # Install the get_hermes_home shim BEFORE importing server.create_app —
+    # which transitively imports upstream Hermes modules that do
+    # `from hermes_constants import get_hermes_home`. The shim must be in
+    # place by then so those imports bind to the patched function and pick
+    # up per-WS profile overrides.
+    from .server import install_profile_override_shim
+    install_profile_override_shim()
+
     from .server import create_app
 
     app = create_app()
-    logger.info("hermes-acp-relay listening on http://%s:%d (WebSocket at /acp)", args.host, args.port)
+    logger.info(
+        "hermes-acp-relay listening on http://%s:%d "
+        "(WebSocket at /acp, sub-profile at /acp/<suffix>)",
+        args.host, args.port,
+    )
     # aiohttp.web.run_app handles SIGINT/SIGTERM cleanly.
     web.run_app(app, host=args.host, port=args.port, print=None)
     return 0

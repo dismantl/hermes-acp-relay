@@ -45,6 +45,8 @@ Binding notes:
 ### Reverse-proxy config
 
 - **Target:** `http://<relay-host>:8765/acp`
+- **Sub-profile target (optional):** `http://<relay-host>:8765/acp/<suffix>` —
+  see "Sub-profile routing" below.
 - **Auth:** HTTP Basic. Generate a password: `openssl rand -base64 32`.
 - **WebSocket:** must be enabled for this resource (standard HTTP/1.1
   `Upgrade: websocket`).
@@ -52,6 +54,33 @@ Binding notes:
 
 The same shape works for Caddy, Traefik, nginx; only the config syntax
 differs.
+
+### Sub-profile routing
+
+In addition to the default `/acp` endpoint, the relay accepts
+`/acp/<profile-suffix>` connections that load a Hermes sub-profile for the
+lifetime of that WS connection. Use cases:
+
+- Voice clients connect to `/acp/voice` to get a voice-tuned Honcho memory
+  policy (no automatic dialectic, low-latency) while text clients keep
+  using `/acp` with the default profile.
+- Operator-triggered deep-memory sessions connect to `/acp/deep` for
+  expensive reflective dialectic.
+
+**Layout convention:** the suffix maps to `${HERMES_HOME}/profiles/<suffix>/`.
+Provision sub-profiles with `gateway: false` and `home:
+"${HERMES_HOME}/profiles/<suffix>"` in your inventory (acab-ansible's
+`hermes` role handles this). 404 if the directory is missing.
+
+**Allowed suffixes:** lowercase letter start, then lowercase letters,
+digits, hyphens. URL-encoded traversal (`%2e%2e`) and symlinks that escape
+`${HERMES_HOME}/profiles/` are rejected at the handler.
+
+**Shared state:** sub-profiles inherit the relay process's loaded `.env`
+and `auth.json`, so all profiles share provider API keys and Anthropic
+OAuth. Honcho `workspace` / `peerName` are typically the same across
+profiles too (set in each sub-profile's `honcho.json`), so memory is
+unified across consumers.
 
 ## Run — client side
 
@@ -110,3 +139,14 @@ file.
 - **Bridge doesn't auto-reconnect.** If the network drops, OAC sees EOF; the
   user clicks Restore in OAC to reopen. Session history is persistent, so the
   conversation resumes in place.
+- **Sub-profile override doesn't reach executor threads.** The per-WS
+  profile override (`/acp/<suffix>` routing) uses `contextvars.ContextVar`
+  to scope the active profile to one asyncio.Task. asyncio child tasks
+  inherit the parent's context; `loop.run_in_executor` threads DO NOT.
+  Hermes' upstream `prompt()` runs the LLM call in an executor thread; if
+  any code in that thread reads `hermes_constants.get_hermes_home()` it
+  sees the default profile, not the override. Phase 0 audit of upstream
+  Hermes (in acab-ansible voice plan) found no executor-thread reads in
+  the ACP path that affect Honcho-policy behavior, but a future regression
+  could surface this. Audit follow-up if profile-specific state leaks
+  between voice and text channels.
