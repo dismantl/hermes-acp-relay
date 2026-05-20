@@ -226,19 +226,23 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
             return_when=asyncio.FIRST_COMPLETED,
         )
         if runner_task not in done:
+            # WS pumps exited first — client disconnected (or the heartbeat
+            # timed out). Cancel the in-flight runner IMMEDIATELY so any held
+            # `_prompt_lock` is released without delay; the previous 2-second
+            # EOF-unwind grace let slow Honcho calls keep the lock held past
+            # this WS's lifetime, queueing subsequent voice/text connections
+            # on the next prompt() attempt. The client is already gone — there
+            # is no partial response we need to flush — so cancelling fast is
+            # strictly safe. See: dismantl/acab-ansible#567 for the originally
+            # observed failure mode (relay wedged across sessions until manual
+            # container restart).
+            runner_task.cancel()
             try:
-                handles.writer.close()  # EOF run_agent's input so it unwinds
-            except Exception:
-                pass
-            try:
-                await asyncio.wait_for(runner_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                runner_task.cancel()
-                await asyncio.gather(runner_task, return_exceptions=True)
-            except Exception:
-                # run_agent raised during EOF/cleanup; the exception is captured
-                # on runner_task and logged by the branch below. Don't let it
-                # escape here or aiohttp will mark the handler as failed.
+                await runner_task
+            except BaseException:
+                # CancelledError on a successful cancel, or any error during
+                # run_agent's own cleanup. Exceptions are still surfaced via
+                # the branch below using runner_task.exception().
                 pass
         if runner_task.done() and not runner_task.cancelled():
             exc = runner_task.exception()
