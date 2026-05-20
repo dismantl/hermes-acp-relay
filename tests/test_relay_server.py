@@ -152,6 +152,73 @@ async def test_prompt_lock_released_promptly_when_ws_disconnects_mid_prompt(
 
 
 @pytest.mark.asyncio
+async def test_prompt_lock_acquisition_times_out_when_previous_holder_wedged(
+    monkeypatch, caplog
+):
+    """Belt-and-suspenders for the acab-ansible#567 cascade.
+
+    If _prompt_lock is held by a wedged earlier prompt — i.e., the primary
+    recovery path in _handle_acp (PR #3) failed to release the lock — a
+    queued caller must time out after _PROMPT_LOCK_TIMEOUT_S rather than
+    waiting forever. The caller receives a refusal PromptResponse so its
+    client can decide how to recover.
+    """
+    import logging
+    import time
+
+    import hermes_acp_relay.server as srv
+
+    # Reduce the timeout so the test completes quickly. Production default
+    # is 60s; 0.3s is enough to exercise the path.
+    monkeypatch.setattr(srv, "_PROMPT_LOCK_TIMEOUT_S", 0.3)
+
+    assert not srv._prompt_lock.locked(), (
+        "_prompt_lock leaked from a previous test"
+    )
+
+    cls = srv._build_serialized_agent_class()
+    agent = cls()
+
+    # Simulate a wedged earlier prompt by holding the lock and never
+    # releasing within the test's bound.
+    await srv._prompt_lock.acquire()
+    try:
+        with caplog.at_level(logging.ERROR, logger="hermes_acp_relay.server"):
+            t_start = time.monotonic()
+            result = await agent.prompt([], "test-session-abc123")
+            elapsed = time.monotonic() - t_start
+
+        # Must have timed out at roughly the configured bound (~0.3s with
+        # margin for asyncio scheduling).
+        assert 0.2 < elapsed < 0.8, (
+            f"expected ~0.3s acquisition timeout, got {elapsed:.2f}s"
+        )
+
+        # Must return a refusal PromptResponse, not raise or hang.
+        assert hasattr(result, "stop_reason"), (
+            f"expected PromptResponse, got {type(result).__name__}: {result!r}"
+        )
+        assert result.stop_reason == "refusal", (
+            f"expected stop_reason='refusal', got {result.stop_reason!r}"
+        )
+
+        # Must log an error naming the session id so an operator can
+        # correlate the timeout to a specific stuck session.
+        timeout_logs = [
+            r for r in caplog.records
+            if "prompt_lock acquisition timed out" in r.message
+        ]
+        assert timeout_logs, "expected a timeout error log"
+        assert "test-session-abc123" in timeout_logs[0].message, (
+            f"expected session id in log; got: {timeout_logs[0].message!r}"
+        )
+    finally:
+        # Defensive cleanup: release the lock if still held.
+        if srv._prompt_lock.locked():
+            srv._prompt_lock.release()
+
+
+@pytest.mark.asyncio
 async def test_handler_logs_and_returns_when_run_agent_raises_mid_execution(
     monkeypatch, caplog
 ):
