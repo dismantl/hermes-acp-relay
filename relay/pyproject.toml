@@ -5,6 +5,11 @@ description = "aiohttp WebSocket server exposing Hermes ACP for network access"
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.9",
+    # Pin explicitly so it stays in lockstep with the voice-agent client
+    # (voice-agent pins the same range). hermes-agent's transitive constraint
+    # is wider; without this override an image rebuild could resolve 0.10.x
+    # while voice-agent stays on 0.9.x and the wire protocol diverges.
+    "agent-client-protocol>=0.9.0,<0.10",
     "hermes-agent[acp]",
 ]
 

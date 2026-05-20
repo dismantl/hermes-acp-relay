@@ -669,12 +669,14 @@ name = "hermes-acp-relay"
 version = "0.1.0"
 source = { editable = "relay" }
 dependencies = [
+    { name = "agent-client-protocol" },
     { name = "aiohttp" },
     { name = "hermes-agent", extra = ["acp"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-client-protocol", specifier = ">=0.9.0,<0.10" },
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "hermes-agent", extras = ["acp"], git = "https://github.com/NousResearch/hermes-agent.git?branch=main" },
 ]
