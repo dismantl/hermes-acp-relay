@@ -239,10 +239,20 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
             runner_task.cancel()
             try:
                 await runner_task
-            except BaseException:
-                # CancelledError on a successful cancel, or any error during
-                # run_agent's own cleanup. Exceptions are still surfaced via
-                # the branch below using runner_task.exception().
+            except asyncio.CancelledError:
+                # Propagated CancelledError from runner_task.cancel() above —
+                # consume; we initiated this and the WS handler should still
+                # run its finally cleanup. If _handle_acp itself is being
+                # externally cancelled (aiohttp shutdown), the cancellation
+                # re-fires at the next await in the finally block; the outer
+                # `except asyncio.CancelledError` handler catches it there.
+                pass
+            except Exception:
+                # run_agent's own error during cleanup. Exceptions are still
+                # surfaced via the branch below using runner_task.exception().
+                # Narrower than `BaseException` so KeyboardInterrupt and
+                # SystemExit propagate as a process exit signal rather than
+                # being silently swallowed mid-cleanup.
                 pass
         if runner_task.done() and not runner_task.cancelled():
             exc = runner_task.exception()
