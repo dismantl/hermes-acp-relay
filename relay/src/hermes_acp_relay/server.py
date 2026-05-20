@@ -226,19 +226,33 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
             return_when=asyncio.FIRST_COMPLETED,
         )
         if runner_task not in done:
+            # WS pumps exited first — client disconnected (or the heartbeat
+            # timed out). Cancel the in-flight runner IMMEDIATELY so any held
+            # `_prompt_lock` is released without delay; the previous 2-second
+            # EOF-unwind grace let slow Honcho calls keep the lock held past
+            # this WS's lifetime, queueing subsequent voice/text connections
+            # on the next prompt() attempt. The client is already gone — there
+            # is no partial response we need to flush — so cancelling fast is
+            # strictly safe. See: dismantl/acab-ansible#567 for the originally
+            # observed failure mode (relay wedged across sessions until manual
+            # container restart).
+            runner_task.cancel()
             try:
-                handles.writer.close()  # EOF run_agent's input so it unwinds
-            except Exception:
+                await runner_task
+            except asyncio.CancelledError:
+                # Propagated CancelledError from runner_task.cancel() above —
+                # consume; we initiated this and the WS handler should still
+                # run its finally cleanup. If _handle_acp itself is being
+                # externally cancelled (aiohttp shutdown), the cancellation
+                # re-fires at the next await in the finally block; the outer
+                # `except asyncio.CancelledError` handler catches it there.
                 pass
-            try:
-                await asyncio.wait_for(runner_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                runner_task.cancel()
-                await asyncio.gather(runner_task, return_exceptions=True)
             except Exception:
-                # run_agent raised during EOF/cleanup; the exception is captured
-                # on runner_task and logged by the branch below. Don't let it
-                # escape here or aiohttp will mark the handler as failed.
+                # run_agent's own error during cleanup. Exceptions are still
+                # surfaced via the branch below using runner_task.exception().
+                # Narrower than `BaseException` so KeyboardInterrupt and
+                # SystemExit propagate as a process exit signal rather than
+                # being silently swallowed mid-cleanup.
                 pass
         if runner_task.done() and not runner_task.cancelled():
             exc = runner_task.exception()

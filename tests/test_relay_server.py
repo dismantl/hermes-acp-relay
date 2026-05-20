@@ -60,19 +60,120 @@ async def test_handler_unwinds_when_run_agent_ignores_stream_close(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_handler_logs_and_returns_when_run_agent_raises_during_cleanup(
+async def test_prompt_lock_released_promptly_when_ws_disconnects_mid_prompt(
+    monkeypatch,
+):
+    """Regression for acab-ansible#567 _prompt_lock cascade.
+
+    If a runner_task is holding _prompt_lock when the client WS disconnects
+    (e.g., on a slow Honcho dialectic call), the handler's cancellation path
+    must release the lock promptly so the next connection's prompt() can
+    proceed. Previously a 2-second EOF-unwind grace let the lock stay held
+    for the full grace duration before cancellation fired; now cancellation
+    on pump-completion is immediate.
+    """
+    import time
+
+    from hermes_acp_relay.server import _prompt_lock
+
+    # Sanity: the lock must start free. If it doesn't, a previous test
+    # leaked state — fail loudly here rather than producing misleading
+    # results downstream.
+    assert not _prompt_lock.locked(), (
+        "_prompt_lock leaked from a previous test"
+    )
+
+    fake_acp = types.ModuleType("acp")
+
+    async def lock_holder_run_agent(agent, *, input_stream, output_stream, **kwargs):
+        # Simulate SerializedHermesACPAgent.prompt() holding _prompt_lock
+        # across a slow upstream call (e.g. a Honcho dialectic that hangs).
+        async with _prompt_lock:
+            await asyncio.Event().wait()  # blocks forever without cancellation
+
+    fake_acp.run_agent = lock_holder_run_agent
+    monkeypatch.setitem(sys.modules, "acp", fake_acp)
+
+    from hermes_acp_relay.server import _handle_acp
+
+    class StubAgent:
+        pass
+
+    app = web.Application()
+    app["agent_cls"] = StubAgent
+
+    completed = asyncio.Event()
+
+    async def tracked_handler(request):
+        try:
+            return await _handle_acp(request)
+        finally:
+            completed.set()
+
+    app.router.add_get("/acp", tracked_handler)
+
+    runner, url = await _start(app)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(url) as ws:
+                # Give the runner a moment to acquire _prompt_lock.
+                await asyncio.sleep(0.1)
+                assert _prompt_lock.locked(), (
+                    "runner_task should have acquired _prompt_lock by now"
+                )
+                # Disconnect mid-prompt — pumps will exit first, triggering
+                # the cancellation path under test.
+                t_disconnect = time.monotonic()
+                await ws.close()
+            await asyncio.wait_for(completed.wait(), timeout=5.0)
+            elapsed = time.monotonic() - t_disconnect
+
+        # The lock must be released so the next connection can proceed.
+        assert not _prompt_lock.locked(), (
+            "_prompt_lock should be released after WS disconnect; "
+            "regression for acab-ansible#567 cascade"
+        )
+        # The handler should have unwound quickly. With the previous
+        # 2-second EOF-unwind grace, this typically took ~2s. With immediate
+        # cancellation, well under 1s. 1.5s threshold leaves CI flake margin
+        # while still catching a regression that re-introduces the grace.
+        assert elapsed < 1.5, (
+            f"handler took {elapsed:.2f}s to unwind after WS disconnect; "
+            f"expected < 1.5s. Suggests the EOF-unwind grace was "
+            f"re-introduced or the cancellation path is not propagating "
+            f"into the prompt() coroutine promptly."
+        )
+    finally:
+        # Defensive cleanup: release the lock if the test somehow left it
+        # held, so subsequent tests in the module don't deadlock on it.
+        if _prompt_lock.locked():
+            _prompt_lock.release()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_handler_logs_and_returns_when_run_agent_raises_mid_execution(
     monkeypatch, caplog
 ):
-    """If a pump finishes first and run_agent then raises during EOF/cleanup,
+    """If run_agent raises during its main execution (before pumps complete),
     the handler must log the crash via runner_task.exception() and return
-    cleanly — not let the exception escape to aiohttp."""
+    cleanly — not let the exception escape to aiohttp.
+
+    Note: this used to test the run-agent-raises-during-EOF-cleanup path,
+    where the handler granted a 2s grace before cancelling. That grace is
+    gone (see acab-ansible#567 lock cascade fix), so cleanup-raises are no
+    longer possible — runner_task is cancelled before reaching its own
+    cleanup. This test now covers the more general 'run_agent raises during
+    execution' contract, which is still meaningful.
+    """
     fake_acp = types.ModuleType("acp")
 
     async def crashing_run_agent(agent, *, input_stream, output_stream, **kwargs):
-        # Block until the server EOFs our output stream (pump-driven shutdown),
-        # then raise — mimicking run_agent crashing during its own cleanup.
-        await output_stream.read()
-        raise RuntimeError("cleanup crash")
+        # Raise on the coroutine's first scheduled iteration. runner_task
+        # transitions to done before the pumps notice the impending WS
+        # close, so FIRST_COMPLETED returns with runner_task in `done` and
+        # the logging branch fires.
+        raise RuntimeError("mid-execution crash")
 
     fake_acp.run_agent = crashing_run_agent
     monkeypatch.setitem(sys.modules, "acp", fake_acp)
