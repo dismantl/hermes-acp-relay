@@ -22,12 +22,28 @@ _MAX_MSG_SIZE = 50 * 1024 * 1024  # matches acp SDK's stdio buffer default
 # global and can misroute approval dialogs between editors. Non-prompt methods
 # (initialize, new_session, cancel, …) still run concurrently.
 #
-# Liveness tradeoff: the lock is held for the full duration of one prompt. There
-# is no numeric timeout because legitimate agent work (tool loops, long model
-# reasoning) can exceed any sane bound. In single-user mode the recovery path
-# is: close the client; the WS drops, _handle_acp's finally cancels the lock-
-# holding task, lock releases.
+# Liveness tradeoff: the lock is held for the full duration of one prompt.
+# Two safety nets keep a wedged holder from blocking subsequent callers
+# indefinitely:
+#
+#   1. _handle_acp cancels its runner_task immediately when WS pumps exit
+#      (i.e., the client disconnected). The cancellation propagates through
+#      `async with _prompt_lock:` to the lock's __aexit__, releasing it.
+#      This is the primary recovery path.
+#
+#   2. Lock acquisition itself is bounded by _PROMPT_LOCK_TIMEOUT_S. If a
+#      previous prompt is truly stuck and (1) failed to release the lock,
+#      a queued caller times out after the bound and returns a refusal
+#      PromptResponse rather than waiting forever. Belt-and-suspenders for
+#      the (1) path; should not fire in normal operation.
+#
+# The timeout is a wall-clock upper bound on QUEUE WAIT, not on a single
+# prompt's total duration. A prompt that legitimately takes 90s to complete
+# is fine — only the NEXT caller's wait for the lock is bounded. Tune via
+# _PROMPT_LOCK_TIMEOUT_S if voice or text channels surface cases where the
+# legitimate queue wait exceeds the default.
 _prompt_lock = asyncio.Lock()
+_PROMPT_LOCK_TIMEOUT_S = 60.0
 
 
 def _build_serialized_agent_class():
@@ -36,13 +52,46 @@ def _build_serialized_agent_class():
 
     class SerializedHermesACPAgent(HermesACPAgent):
         async def prompt(self, *args, **kwargs):
-            async with _prompt_lock:
+            # Acquire the process-wide prompt lock with a wall-clock bound.
+            # Under normal operation _prompt_lock is uncontested or briefly
+            # held; the timeout only fires if a previous prompt is wedged
+            # (e.g., a Honcho dialectic call hung and the cancellation path
+            # in _handle_acp failed to release the lock). Returns a refusal
+            # PromptResponse rather than queueing the caller forever.
+            session_id = kwargs.get("session_id")
+            if session_id is None and len(args) >= 2:
+                session_id = args[1]
+            session_id = session_id or "<unknown>"
+            try:
+                await asyncio.wait_for(
+                    _prompt_lock.acquire(),
+                    timeout=_PROMPT_LOCK_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "prompt_lock acquisition timed out after %.1fs on session "
+                    "%s; an earlier prompt is wedged. Returning refusal so the "
+                    "client can recover. This is the belt-and-suspenders safety "
+                    "net for the issue 567 cascade — its firing indicates the "
+                    "primary recovery path in _handle_acp did not release the "
+                    "lock as expected.",
+                    _PROMPT_LOCK_TIMEOUT_S,
+                    session_id,
+                )
+                # Lazy import — only reached on the rare timeout path; acp is
+                # imported lazily elsewhere in this module per post-bootstrap
+                # convention.
+                from acp.schema import PromptResponse
+                return PromptResponse(stop_reason="refusal")
+            try:
                 patch_state = self._install_stream_patch(args, kwargs)
                 try:
                     return await super().prompt(*args, **kwargs)
                 finally:
                     if patch_state is not None:
                         self._uninstall_stream_patch(*patch_state)
+            finally:
+                _prompt_lock.release()
 
         # --- streaming patch ---------------------------------------------------
         #
