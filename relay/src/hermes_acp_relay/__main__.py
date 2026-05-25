@@ -25,6 +25,15 @@ def _load_hermes_env() -> None:
     load_hermes_dotenv(hermes_home=get_hermes_home())
 
 
+def _discover_mcp_tools(logger: logging.Logger) -> None:
+    """Register configured MCP tools before serving ACP sessions."""
+    try:
+        from tools.mcp_tool import discover_mcp_tools
+        discover_mcp_tools()
+    except Exception:
+        logger.debug("MCP tool discovery failed at ACP relay startup", exc_info=True)
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hermes-acp-relay",
@@ -71,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     # up per-WS profile overrides.
     from .server import install_profile_override_shim
     install_profile_override_shim()
+    _discover_mcp_tools(logger)
 
     from .server import create_app
 
