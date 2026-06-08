@@ -16,7 +16,7 @@ jobs:
       - name: Install uv
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl
+          apt-get install -y --no-install-recommends ca-certificates curl git
           curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Set up Python
