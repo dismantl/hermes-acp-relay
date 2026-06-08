@@ -61,8 +61,8 @@ In addition to the default `/acp` endpoint, the relay accepts
 `/acp/<profile-suffix>` connections that load a Hermes sub-profile for the
 lifetime of that WS connection. Use cases:
 
-- Low-latency clients connect to `/acp/fast` to get a profile with a
-  faster Honcho memory policy while default clients keep
+- Voice clients connect to `/acp/voice` to get a profile with a
+  low-latency Honcho memory policy while default clients keep
   using `/acp` with the default profile.
 - Operator-triggered deep-memory sessions connect to `/acp/deep` for
   expensive reflective dialectic.
