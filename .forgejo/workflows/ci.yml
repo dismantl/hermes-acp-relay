@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: docker
+    container:
+      image: node:20-bookworm-slim
+    steps:
+      - name: Check out repository
+        uses: https://data.forgejo.org/actions/checkout@v4
+
+      - name: Install uv
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Set up Python
+        run: |
+          "$HOME/.local/bin/uv" python install 3.13
+
+      - name: Sync workspace
+        run: |
+          "$HOME/.local/bin/uv" sync --all-packages --locked
+
+      - name: Run tests
+        run: |
+          "$HOME/.local/bin/uv" run pytest
