@@ -23,10 +23,9 @@ _MAX_MSG_SIZE = 50 * 1024 * 1024  # matches acp SDK's stdio buffer default
 # Per-WS profile override
 #
 # The relay serves multiple ACP consumers (Obsidian Agent Client, hermes-
-# acp-bridge, the V2 voice agent) from the same process. Each consumer may
-# want different Hermes-side behavior — most notably, the voice agent wants
-# a different Honcho memory policy than the text channels (see acab-ansible
-# voice plan + Honcho policy layer redesign).
+# acp-bridge, and other ACP clients) from the same process. Each consumer may
+# want different Hermes-side behavior; for example, a low-latency channel can
+# use a different Honcho memory policy than the default text channel.
 #
 # Approach: a ContextVar holds an optional profile-home override per
 # asyncio.Task; the /acp/<profile-suffix> URL route sets it before the
@@ -39,10 +38,9 @@ _MAX_MSG_SIZE = 50 * 1024 * 1024  # matches acp SDK's stdio buffer default
 # Caveat: ContextVars are NOT automatically propagated to executor threads
 # (loop.run_in_executor). If Hermes' upstream prompt() reads get_hermes_home()
 # inside an executor, that read sees the default profile, not the override.
-# The Phase 0 audit (see acab-ansible voice plan) found no executor-thread
-# reads in the ACP path that would matter for the Honcho-policy use case,
-# but this is the known limitation. Audit follow-up if a profile-specific
-# leak is ever observed.
+# A local audit found no executor-thread reads in the ACP path that would
+# matter for the Honcho-policy use case, but this is the known limitation.
+# Audit follow-up if a profile-specific leak is ever observed.
 _HERMES_HOME_OVERRIDE: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar(
     "hermes_home_override", default=None
 )
@@ -113,8 +111,8 @@ def install_profile_override_shim() -> None:
 # The timeout is a wall-clock upper bound on QUEUE WAIT, not on a single
 # prompt's total duration. A prompt that legitimately takes 90s to complete
 # is fine — only the NEXT caller's wait for the lock is bounded. Tune via
-# _PROMPT_LOCK_TIMEOUT_S if voice or text channels surface cases where the
-# legitimate queue wait exceeds the default.
+# _PROMPT_LOCK_TIMEOUT_S if real clients surface cases where the legitimate
+# queue wait exceeds the default.
 _prompt_lock = asyncio.Lock()
 _PROMPT_LOCK_TIMEOUT_S = 60.0
 
@@ -145,7 +143,7 @@ def _build_serialized_agent_class():
                     "prompt_lock acquisition timed out after %.1fs on session "
                     "%s; an earlier prompt is wedged. Returning refusal so the "
                     "client can recover. This is the belt-and-suspenders safety "
-                    "net for the issue 567 cascade — its firing indicates the "
+                    "net for a prompt-lock cascade — its firing indicates the "
                     "primary recovery path in _handle_acp did not release the "
                     "lock as expected.",
                     _PROMPT_LOCK_TIMEOUT_S,
@@ -208,12 +206,11 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
             # timed out). Cancel the in-flight runner IMMEDIATELY so any held
             # `_prompt_lock` is released without delay; the previous 2-second
             # EOF-unwind grace let slow Honcho calls keep the lock held past
-            # this WS's lifetime, queueing subsequent voice/text connections
-            # on the next prompt() attempt. The client is already gone — there
+            # this WS's lifetime, queueing subsequent client connections on the
+            # next prompt() attempt. The client is already gone — there
             # is no partial response we need to flush — so cancelling fast is
-            # strictly safe. See: dismantl/acab-ansible#567 for the originally
-            # observed failure mode (relay wedged across sessions until manual
-            # container restart).
+            # strictly safe. The original failure mode wedged the relay across
+            # sessions until the process was restarted.
             runner_task.cancel()
             try:
                 await runner_task
@@ -279,9 +276,8 @@ async def _handle_acp(request: web.Request) -> web.WebSocketResponse:
 async def _handle_acp_with_profile_override(request: web.Request) -> web.WebSocketResponse:
     """WS handler for /acp/<profile-suffix> — loads a Hermes sub-profile.
 
-    The sub-profile must exist at ${HERMES_HOME}/profiles/<suffix>/ (a
-    `gateway: false` profile dir as provisioned by acab-ansible's hermes
-    role). Returns 404 if the directory is missing. Sets the per-WS
+    The sub-profile must exist at ${HERMES_HOME}/profiles/<suffix>/. Returns
+    404 if the directory is missing. Sets the per-WS
     _HERMES_HOME_OVERRIDE ContextVar for the lifetime of this WS connection
     and delegates to _handle_acp; the shim around hermes_constants.get_hermes_home
     routes profile-state reads to the override path.

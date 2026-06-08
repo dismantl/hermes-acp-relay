@@ -63,7 +63,7 @@ async def test_handler_unwinds_when_run_agent_ignores_stream_close(monkeypatch):
 async def test_prompt_lock_released_promptly_when_ws_disconnects_mid_prompt(
     monkeypatch,
 ):
-    """Regression for acab-ansible#567 _prompt_lock cascade.
+    """Regression for prompt-lock release on WebSocket disconnect.
 
     If a runner_task is holding _prompt_lock when the client WS disconnects
     (e.g., on a slow Honcho dialectic call), the handler's cancellation path
@@ -131,7 +131,7 @@ async def test_prompt_lock_released_promptly_when_ws_disconnects_mid_prompt(
         # The lock must be released so the next connection can proceed.
         assert not _prompt_lock.locked(), (
             "_prompt_lock should be released after WS disconnect; "
-            "regression for acab-ansible#567 cascade"
+            "regression for prompt-lock cascade"
         )
         # The handler should have unwound quickly. With the previous
         # 2-second EOF-unwind grace, this typically took ~2s. With immediate
@@ -155,10 +155,10 @@ async def test_prompt_lock_released_promptly_when_ws_disconnects_mid_prompt(
 async def test_prompt_lock_acquisition_times_out_when_previous_holder_wedged(
     monkeypatch, caplog
 ):
-    """Belt-and-suspenders for the acab-ansible#567 cascade.
+    """Belt-and-suspenders for prompt-lock cascade recovery.
 
     If _prompt_lock is held by a wedged earlier prompt — i.e., the primary
-    recovery path in _handle_acp (PR #3) failed to release the lock — a
+    recovery path in _handle_acp failed to release the lock — a
     queued caller must time out after _PROMPT_LOCK_TIMEOUT_S rather than
     waiting forever. The caller receives a refusal PromptResponse so its
     client can decide how to recover.
@@ -228,7 +228,7 @@ async def test_handler_logs_and_returns_when_run_agent_raises_mid_execution(
 
     Note: this used to test the run-agent-raises-during-EOF-cleanup path,
     where the handler granted a 2s grace before cancelling. That grace is
-    gone (see acab-ansible#567 lock cascade fix), so cleanup-raises are no
+    gone, so cleanup-raises are no
     longer possible — runner_task is cancelled before reaching its own
     cleanup. This test now covers the more general 'run_agent raises during
     execution' contract, which is still meaningful.
@@ -290,10 +290,10 @@ async def test_handler_logs_and_returns_when_run_agent_raises_mid_execution(
 # ---------------------------------------------------------------------------
 # Per-WS profile override (ContextVar shim + /acp/<suffix> route)
 #
-# Background: the relay serves multiple ACP consumers from one process. The
-# Honcho policy layer redesign requires each consumer's WS connection to
-# load a different Hermes sub-profile (e.g., voice sessions use a different
-# honcho.json than the default text-channel profile). Mechanism: a ContextVar
+# Background: the relay serves multiple ACP consumers from one process. Some
+# consumers need their WS connection to load a different Hermes sub-profile
+# (for example, a custom honcho.json instead of the default profile).
+# Mechanism: a ContextVar
 # carries the per-WS profile-home override; a shim wraps
 # hermes_constants.get_hermes_home() to consult it; the /acp/<suffix> route
 # sets the ContextVar based on URL path before instantiating the agent.
@@ -432,8 +432,8 @@ async def test_acp_subprofile_route_resolves_path_and_sets_contextvar(
     base = tmp_path / "hermes-home"
     base.mkdir()
     (base / "profiles").mkdir()
-    voice_profile = base / "profiles" / "voice"
-    voice_profile.mkdir()
+    custom_profile = base / "profiles" / "custom"
+    custom_profile.mkdir()
 
     monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: base)
     srv.install_profile_override_shim()
@@ -464,13 +464,13 @@ async def test_acp_subprofile_route_resolves_path_and_sets_contextvar(
     port = site._server.sockets[0].getsockname()[1]
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"http://127.0.0.1:{port}/acp/voice") as resp:
+            async with session.get(f"http://127.0.0.1:{port}/acp/custom") as resp:
                 assert resp.status == 200, await resp.text()
     finally:
         await runner.cleanup()
 
-    assert observed.get("home") == voice_profile, (
-        f"expected override to {voice_profile}, got {observed.get('home')!r}"
+    assert observed.get("home") == custom_profile, (
+        f"expected override to {custom_profile}, got {observed.get('home')!r}"
     )
 
     # After the request returns, the ContextVar should be reset to default.
@@ -490,7 +490,7 @@ async def test_acp_subprofile_route_returns_404_for_missing_profile(
     base = tmp_path / "hermes-home"
     base.mkdir()
     (base / "profiles").mkdir()
-    # NOTE: no "voice" subdir created.
+    # NOTE: no "custom" subdir created.
 
     monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: base)
     srv.install_profile_override_shim()
@@ -516,7 +516,7 @@ async def test_acp_subprofile_route_returns_404_for_missing_profile(
     port = site._server.sockets[0].getsockname()[1]
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"http://127.0.0.1:{port}/acp/voice") as resp:
+            async with session.get(f"http://127.0.0.1:{port}/acp/custom") as resp:
                 assert resp.status == 404, await resp.text()
     finally:
         await runner.cleanup()
