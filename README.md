@@ -13,7 +13,7 @@ Two packages in one repo because they run on different machines:
   command"; it proxies ACP JSON-RPC to the relay server.
 
 Auth and TLS are the reverse proxy's job. This repo assumes a proxy
-(Pangolin, Caddy, Traefik, …) terminates TLS and enforces HTTP Basic auth or
+(Caddy, Traefik, nginx, …) terminates TLS and enforces HTTP Basic auth or
 similar on the WS upgrade request. The relay itself has zero auth code.
 
 ## Install
@@ -61,16 +61,16 @@ In addition to the default `/acp` endpoint, the relay accepts
 `/acp/<profile-suffix>` connections that load a Hermes sub-profile for the
 lifetime of that WS connection. Use cases:
 
-- Voice clients connect to `/acp/voice` to get a voice-tuned Honcho memory
-  policy (no automatic dialectic, low-latency) while text clients keep
+- Low-latency clients connect to `/acp/fast` to get a profile with a
+  faster Honcho memory policy while default clients keep
   using `/acp` with the default profile.
 - Operator-triggered deep-memory sessions connect to `/acp/deep` for
   expensive reflective dialectic.
 
 **Layout convention:** the suffix maps to `${HERMES_HOME}/profiles/<suffix>/`.
-Provision sub-profiles with `gateway: false` and `home:
-"${HERMES_HOME}/profiles/<suffix>"` in your inventory (acab-ansible's
-`hermes` role handles this). 404 if the directory is missing.
+Provision sub-profiles as standalone Hermes homes, typically with
+`gateway: false` and `home: "${HERMES_HOME}/profiles/<suffix>"`. The relay
+returns 404 if the directory is missing.
 
 **Allowed suffixes:** lowercase letter start, then lowercase letters,
 digits, hyphens. URL-encoded traversal (`%2e%2e`) and symlinks that escape
@@ -145,8 +145,7 @@ file.
   inherit the parent's context; `loop.run_in_executor` threads DO NOT.
   Hermes' upstream `prompt()` runs the LLM call in an executor thread; if
   any code in that thread reads `hermes_constants.get_hermes_home()` it
-  sees the default profile, not the override. Phase 0 audit of upstream
-  Hermes (in acab-ansible voice plan) found no executor-thread reads in
-  the ACP path that affect Honcho-policy behavior, but a future regression
-  could surface this. Audit follow-up if profile-specific state leaks
-  between voice and text channels.
+  sees the default profile, not the override. A local audit of upstream
+  Hermes found no executor-thread reads in the ACP path that affect
+  Honcho-policy behavior, but a future regression could surface this.
+  Audit follow-up if profile-specific state leaks between channels.
