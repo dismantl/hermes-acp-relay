@@ -18,8 +18,12 @@ similar on the WS upgrade request. The relay itself has zero auth code.
 
 ## Install
 
-Requires Python ≥ 3.11. The workspace fetches `hermes-agent` from its public
-GitHub repository.
+Requires Python ≥ 3.11. The workspace installs `hermes-agent` from its public
+GitHub repository, pinned to a specific tested revision (see `[tool.uv.sources]`
+in the root `pyproject.toml`) rather than a moving branch. The relay imports and
+subclasses hermes-agent internals, so the pin is bumped deliberately in a pull
+request — CI exercises those internals against the new revision
+(`tests/test_hermes_internals_smoke.py`) before the bump lands.
 
 ```sh
 # from this repo checkout

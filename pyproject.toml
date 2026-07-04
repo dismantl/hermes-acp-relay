@@ -8,7 +8,14 @@ requires-python = ">=3.11"
 members = ["relay", "bridge"]
 
 [tool.uv.sources]
-hermes-agent = { git = "https://github.com/NousResearch/hermes-agent.git", branch = "main" }
+# hermes-agent is pinned to a specific, tested revision rather than a moving
+# branch. The relay imports and subclasses hermes-agent internals
+# (`acp_adapter.server.HermesACPAgent`) and monkeypatches
+# `hermes_constants.get_hermes_home`, so an unvetted upstream bump can break the
+# relay. Bump this rev deliberately in a PR so CI exercises the internals
+# against the new version before it lands (see
+# tests/test_hermes_internals_smoke.py).
+hermes-agent = { git = "https://github.com/NousResearch/hermes-agent.git", rev = "7c1a029553d87c43ecff8a3821336bc95872213b" }
 
 [dependency-groups]
 dev = [
