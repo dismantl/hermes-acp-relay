@@ -13,6 +13,8 @@ from typing import Callable, Optional
 
 from aiohttp import web
 
+from .exec_proc import run_exec_session
+from .exec_routes import ExecRoute
 from .ws_streams import ws_to_asyncio_streams
 
 logger = logging.getLogger(__name__)
@@ -330,7 +332,29 @@ async def _handle_health(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
-def create_app() -> web.Application:
+def _make_exec_route_handler(route: ExecRoute):
+    async def _handle_exec_route(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse(max_msg_size=_MAX_MSG_SIZE, heartbeat=30.0)
+        await ws.prepare(request)
+        logger.info(
+            "exec route %s client connected: %s",
+            route.name,
+            request.remote,
+        )
+        try:
+            await run_exec_session(ws, route)
+        finally:
+            logger.info(
+                "exec route %s client disconnected: %s",
+                route.name,
+                request.remote,
+            )
+        return ws
+
+    return _handle_exec_route
+
+
+def create_app(exec_routes: dict[str, ExecRoute] | None = None) -> web.Application:
     """Construct the aiohttp application. Caller must have bootstrapped Hermes
     and called install_profile_override_shim() first.
     """
@@ -338,9 +362,14 @@ def create_app() -> web.Application:
     app["agent_cls"] = _build_serialized_agent_class()
     app.router.add_get("/health", _handle_health)
     app.router.add_get("/acp", _handle_acp)
+    # Exec routes are exact paths and must be registered before the profile
+    # suffix pattern below so a configured command can intentionally shadow a
+    # same-named Hermes sub-profile.
+    for name, route in (exec_routes or {}).items():
+        app.router.add_get(f"/acp/{name}", _make_exec_route_handler(route))
     # Per-WS profile-switching route. URL suffix maps to a sub-profile
-    # directory under ${HERMES_HOME}/profiles/. See the _HERMES_HOME_OVERRIDE
-    # docstring at module top for the design.
+    # directory under ${HERMES_HOME}/profiles/. Keep this after exact exec
+    # routes; aiohttp matches in registration order.
     app.router.add_get(
         "/acp/{profile_suffix:" + _PROFILE_SUFFIX_PATTERN + "}",
         _handle_acp_with_profile_override,

@@ -666,7 +666,7 @@ requires-dist = [{ name = "aiohttp", specifier = ">=3.9" }]
 
 [[package]]
 name = "hermes-acp-relay"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "relay" }
 dependencies = [
     { name = "agent-client-protocol" },
