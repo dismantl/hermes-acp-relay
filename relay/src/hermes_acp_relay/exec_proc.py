@@ -8,6 +8,7 @@ import os
 from aiohttp import WSMsgType, web
 
 from .exec_routes import ExecRoute
+from .ws_streams import _STREAM_LIMIT
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ async def run_exec_session(ws: web.WebSocketResponse, route: ExecRoute) -> None:
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ, **route.env},
             cwd=route.cwd,
+            limit=_STREAM_LIMIT,
         )
     except OSError:
         logger.error("exec route %s failed to spawn", route.name, exc_info=True)
@@ -98,16 +100,19 @@ async def run_exec_session(ws: web.WebSocketResponse, route: ExecRoute) -> None:
         except Exception:
             logger.exception("exec route %s stderr pump failed", route.name)
 
-    pump_tasks = {
+    io_tasks = {
         asyncio.create_task(pump_ws_to_child(), name=f"exec-{route.name}-ws-to-stdin"),
         asyncio.create_task(pump_child_to_ws(), name=f"exec-{route.name}-stdout-to-ws"),
-        asyncio.create_task(pump_stderr_to_log(), name=f"exec-{route.name}-stderr"),
     }
+    stderr_task = asyncio.create_task(
+        pump_stderr_to_log(),
+        name=f"exec-{route.name}-stderr",
+    )
     wait_task = asyncio.create_task(child.wait(), name=f"exec-{route.name}-wait")
 
     try:
         done, _ = await asyncio.wait(
-            pump_tasks | {wait_task},
+            io_tasks | {wait_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
         if wait_task in done:
@@ -128,10 +133,11 @@ async def run_exec_session(ws: web.WebSocketResponse, route: ExecRoute) -> None:
         await _terminate_child(child)
         raise
     finally:
-        for task in pump_tasks:
+        all_pump_tasks = io_tasks | {stderr_task}
+        for task in all_pump_tasks:
             if not task.done():
                 task.cancel()
-        await asyncio.gather(*pump_tasks, return_exceptions=True)
+        await asyncio.gather(*all_pump_tasks, return_exceptions=True)
         if child.returncode is None:
             await _terminate_child(child)
         if not wait_task.done():

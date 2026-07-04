@@ -23,6 +23,7 @@ class ExecRoute:
 # Keep in sync with server._PROFILE_SUFFIX_PATTERN. This module deliberately
 # avoids importing server.py so server -> exec_proc -> exec_routes stays acyclic.
 _ROUTE_NAME_PATTERN = r"[a-z][a-z0-9-]*"
+_TOP_LEVEL_KEYS = frozenset({"routes"})
 _ROUTE_KEYS = frozenset({"command", "env", "cwd"})
 
 
@@ -37,6 +38,11 @@ def load_exec_routes(path: Path) -> dict[str, ExecRoute]:
         raise ExecRouteConfigError(f"Failed to parse exec routes config {path}: {e}") from e
     except OSError as e:
         raise ExecRouteConfigError(f"Failed to read exec routes config {path}: {e}") from e
+
+    unknown_top_level_keys = set(data) - _TOP_LEVEL_KEYS
+    if unknown_top_level_keys:
+        keys = ", ".join(sorted(unknown_top_level_keys))
+        raise ExecRouteConfigError(f"Exec routes config has unknown top-level key(s): {keys}")
 
     routes = data.get("routes", {})
     if not isinstance(routes, dict):

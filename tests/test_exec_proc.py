@@ -91,6 +91,21 @@ async def test_run_exec_session_merges_route_env_into_child_env() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_exec_session_allows_large_stdout_lines() -> None:
+    runner, url, completed = await _start_exec_app(_fake_route("large-route", "large"))
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(url) as ws:
+                await ws.send_str("large")
+                reply = await _receive_json(ws)
+                assert reply == {"echo": "x" * 70_000}
+                await ws.close()
+        await asyncio.wait_for(completed.wait(), timeout=5.0)
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_run_exec_session_closes_ws_when_child_exits() -> None:
     runner, url, completed = await _start_exec_app(_fake_route("exit-route", "exit-now"))
     try:
@@ -179,3 +194,20 @@ async def test_run_exec_session_logs_child_stderr_with_route_prefix(caplog) -> N
         and "[stderr-route] stderr probe" in record.getMessage()
         for record in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_run_exec_session_keeps_running_when_child_closes_stderr() -> None:
+    runner, url, completed = await _start_exec_app(
+        _fake_route("close-stderr-route", "close-stderr")
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(url) as ws:
+                await asyncio.sleep(0.2)
+                await ws.send_str("ping")
+                assert await _receive_json(ws) == {"echo": "ping"}
+                await ws.close()
+        await asyncio.wait_for(completed.wait(), timeout=5.0)
+    finally:
+        await runner.cleanup()

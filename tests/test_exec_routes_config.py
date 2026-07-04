@@ -87,6 +87,17 @@ def test_load_exec_routes_rejects_unknown_route_keys(tmp_path: Path) -> None:
         load_exec_routes(config_path)
 
 
+def test_load_exec_routes_rejects_unknown_top_level_keys(tmp_path: Path) -> None:
+    config_path = tmp_path / "exec-routes.toml"
+    config_path.write_text(
+        "[route.worker]\n"
+        'command = ["python3", "-m", "worker"]\n'
+    )
+
+    with pytest.raises(ExecRouteConfigError, match="unknown top-level"):
+        load_exec_routes(config_path)
+
+
 def test_load_exec_routes_missing_file_gives_helpful_error(tmp_path: Path) -> None:
     with pytest.raises(ExecRouteConfigError, match="not found"):
         load_exec_routes(tmp_path / "missing.toml")

@@ -5,6 +5,8 @@ Modes via argv[1]:
   env       -- print {"env": os.environ.get("PROBE_VAR", "")} once, then echo
   exit-now  -- exit 0 immediately
   stderr    -- write one line to stderr, then echo
+  close-stderr -- close stderr, then echo
+  large     -- write one stdout line larger than asyncio's default limit
   hang      -- run until terminated, never writing stdout
 """
 from __future__ import annotations
@@ -37,6 +39,13 @@ def main() -> int:
     elif mode == "stderr":
         print("stderr probe", file=sys.stderr, flush=True)
         _echo()
+    elif mode == "close-stderr":
+        sys.stderr.close()
+        os.close(2)
+        _echo()
+    elif mode == "large":
+        for line in sys.stdin:
+            print(json.dumps({"echo": "x" * 70_000}), flush=True)
     elif mode == "hang":
         while True:
             time.sleep(60)
