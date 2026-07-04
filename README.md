@@ -82,6 +82,46 @@ OAuth. Honcho `workspace` / `peerName` are typically the same across
 profiles too (set in each sub-profile's `honcho.json`), so memory is
 unified across consumers.
 
+### Exec routes
+
+Exec routes let the relay serve any command that speaks ACP over stdio at a
+configured `/acp/<name>` path. The relay spawns one child process per WebSocket
+connection and pipes frames transparently: WebSocket text frames become
+newline-delimited stdin lines, and child stdout lines become WebSocket text
+frames. The relay does not inspect or rewrite ACP traffic on these routes.
+
+Start the relay with a TOML route file:
+
+```sh
+uv run hermes-acp-relay --exec-routes /etc/hermes-acp-relay/exec-routes.toml
+```
+
+You can also set `HERMES_ACP_RELAY_EXEC_ROUTES` instead of passing the flag.
+
+```toml
+[routes.my-agent]
+command = ["python3", "/opt/tools/my_agent.py"]
+env = { MY_AGENT_CONFIG = "/etc/my-agent.toml" }
+cwd = "/opt/tools"
+```
+
+Route names use the same suffix shape as sub-profiles: a lowercase letter,
+then lowercase letters, digits, or hyphens. The config is strict; typos such
+as unknown route keys fail startup instead of being ignored.
+
+Exec routes are registered before sub-profile routes. If `/acp/my-agent` is
+both an exec route and a sub-profile suffix, the exec route wins.
+
+Security posture is the same as the rest of the relay: there is no built-in
+auth, so bind privately and put authentication at the reverse proxy. Child
+processes inherit the relay environment with any per-route `env` values merged
+over it. Treat configured commands as the same trust domain as the relay.
+
+Use an exec route when you want process isolation, a route-specific command or
+profile, or an ACP-compatible agent that is not the embedded Hermes agent. The
+spawn-per-connection contract adds startup latency, so the embedded `/acp`
+route remains a better fit for latency-sensitive voice-style interactions.
+
 ## Run — client side
 
 ```sh

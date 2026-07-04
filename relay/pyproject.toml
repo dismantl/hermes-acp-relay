@@ -1,6 +1,6 @@
 [project]
 name = "hermes-acp-relay"
-version = "0.1.0"
+version = "0.2.0"
 description = "aiohttp WebSocket server exposing Hermes ACP for network access"
 requires-python = ">=3.11"
 dependencies = [
