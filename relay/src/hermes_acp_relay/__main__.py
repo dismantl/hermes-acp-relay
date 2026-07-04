@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+from pathlib import Path
 import sys
 
 from aiohttp import web
@@ -58,6 +60,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging verbosity (default: INFO).",
     )
+    parser.add_argument(
+        "--exec-routes",
+        help="TOML file defining command-backed /acp/<name> routes. Defaults "
+        "to HERMES_ACP_RELAY_EXEC_ROUTES when set.",
+    )
     return parser.parse_args(argv)
 
 
@@ -65,6 +72,17 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     _setup_logging(args.log_level)
     logger = logging.getLogger(__name__)
+
+    exec_route_path = args.exec_routes or os.environ.get("HERMES_ACP_RELAY_EXEC_ROUTES")
+    exec_routes = {}
+    if exec_route_path:
+        from .exec_routes import ExecRouteConfigError, load_exec_routes
+
+        try:
+            exec_routes = load_exec_routes(Path(exec_route_path))
+        except ExecRouteConfigError as e:
+            logger.error("Invalid exec routes config: %s", e)
+            return 1
 
     logger.info("Bootstrapping Hermes environment")
     try:
@@ -84,12 +102,22 @@ def main(argv: list[str] | None = None) -> int:
 
     from .server import create_app
 
-    app = create_app()
-    logger.info(
-        "hermes-acp-relay listening on http://%s:%d "
-        "(WebSocket at /acp, sub-profile at /acp/<suffix>)",
-        args.host, args.port,
-    )
+    app = create_app(exec_routes=exec_routes) if exec_routes else create_app()
+    if exec_routes:
+        logger.info(
+            "hermes-acp-relay listening on http://%s:%d "
+            "(WebSocket at /acp, sub-profile at /acp/<suffix>, "
+            "exec routes: %s)",
+            args.host,
+            args.port,
+            ", ".join(sorted(exec_routes)),
+        )
+    else:
+        logger.info(
+            "hermes-acp-relay listening on http://%s:%d "
+            "(WebSocket at /acp, sub-profile at /acp/<suffix>)",
+            args.host, args.port,
+        )
     # aiohttp.web.run_app handles SIGINT/SIGTERM cleanly.
     web.run_app(app, host=args.host, port=args.port, print=None)
     return 0
