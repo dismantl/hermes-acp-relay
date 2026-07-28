@@ -9,6 +9,18 @@
   "rebaseWhen": "conflicted",
   "packageRules": [
     {
+      "description": "ACP compatibility is owned by the exact constraint in the pinned hermes-agent[acp] extra; never update it independently.",
+      "matchManagers": ["pep621"],
+      "matchPackageNames": ["agent-client-protocol"],
+      "enabled": false
+    },
+    {
+      "description": "acab-ansible's tested Hermes promotion workflow owns this git revision and regenerates uv.lock; Renovate must not advance it independently.",
+      "matchManagers": ["pep621"],
+      "matchPackageNames": ["hermes-agent"],
+      "enabled": false
+    },
+    {
       "description": "Automerge passing patch updates",
       "matchUpdateTypes": ["patch"],
       "automerge": true,

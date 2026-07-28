@@ -632,7 +632,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-client-protocol", specifier = ">=0.9.0,<0.10" },
+    { name = "agent-client-protocol" },
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "hermes-agent", extras = ["acp"], git = "https://github.com/NousResearch/hermes-agent.git?rev=7c1a029553d87c43ecff8a3821336bc95872213b" },
 ]
