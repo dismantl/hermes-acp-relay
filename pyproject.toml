@@ -15,7 +15,7 @@ members = ["relay", "bridge"]
 # relay. Bump this rev deliberately in a PR so CI exercises the internals
 # against the new version before it lands (see
 # tests/test_hermes_internals_smoke.py).
-hermes-agent = { git = "https://github.com/NousResearch/hermes-agent.git", rev = "7c1a029553d87c43ecff8a3821336bc95872213b" }
+hermes-agent = { git = "https://github.com/NousResearch/hermes-agent.git", rev = "3ef6bbd201263d354fd83ec55b3c306ded2eb72a" }
 
 [dependency-groups]
 dev = [
