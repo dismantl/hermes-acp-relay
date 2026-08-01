@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: docker
     container:
-      image: node:20-bookworm-slim
+      image: node:24-bookworm-slim
     steps:
       - name: Check out repository
         uses: https://data.forgejo.org/actions/checkout@v7
