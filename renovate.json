@@ -25,6 +25,20 @@
       "matchUpdateTypes": ["patch"],
       "automerge": true,
       "platformAutomerge": true
+    },
+    {
+      "description": "Keep uv releases, Docker images, and setup-uv action updates in one PR, even when their update types differ.",
+      "matchPackageNames": [
+        "uv",
+        "astral-sh/uv",
+        "https://github.com/astral-sh/uv",
+        "ghcr.io/astral-sh/uv",
+        "astral-sh/setup-uv",
+        "https://github.com/astral-sh/setup-uv"
+      ],
+      "groupName": "uv toolchain",
+      "separateMajorMinor": false,
+      "separateMinorPatch": false
     }
   ]
 }
