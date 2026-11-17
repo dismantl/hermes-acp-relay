@@ -18,24 +18,30 @@ similar on the WS upgrade request. The relay itself has zero auth code.
 
 ## Install
 
-Requires Python ≥ 3.11. The workspace installs `hermes-agent` from its public
-GitHub repository, pinned to a specific tested revision (see `[tool.uv.sources]`
-in the root `pyproject.toml`) rather than a moving branch. The relay imports and
-subclasses hermes-agent internals, so the pin is bumped deliberately in a pull
-request — CI exercises those internals against the new revision
-(`tests/test_hermes_internals_smoke.py`) before the bump lands.
+Requires Python ≥ 3.11. The relay imports and subclasses hermes-agent
+internals, but it does not install hermes-agent: upstream only supports its
+shell installer, Docker image, and Nix builds, and refuses to build a wheel.
+The relay is installed with `--no-deps` into the pinned
+`nousresearch/hermes-agent` image, and CI runs inside that same image digest
+(`container.image` in `.forgejo/workflows/ci.yml` and
+`.github/workflows/ci.yml`). acab-ansible's Hermes promotion opens a PR moving
+that digest to each promoted release, so CI exercises those internals
+(`tests/test_hermes_internals_smoke.py`) against the version production runs.
+
+Most tests import hermes-agent, so run the suite in the CI image:
 
 ```sh
-# from this repo checkout
-uv sync --all-packages
+image=$(sed -n 's/^ *image: *//p' .forgejo/workflows/ci.yml)
+docker run --rm -v "$PWD:/src" -w /src --entrypoint sh "$image" scripts/ci-test.sh
 ```
-
-This installs both workspace members and `hermes-agent` with the `[acp]` extra.
 
 ## Run — server side
 
+The server runs inside the hermes-agent image, with the relay installed into
+its venv as in `scripts/ci-test.sh`:
+
 ```sh
-uv run hermes-acp-relay --host 127.0.0.1 --port 8765
+hermes-acp-relay --host 127.0.0.1 --port 8765
 ```
 
 Binding notes:
@@ -97,7 +103,7 @@ frames. The relay does not inspect or rewrite ACP traffic on these routes.
 Start the relay with a TOML route file:
 
 ```sh
-uv run hermes-acp-relay --exec-routes /etc/hermes-acp-relay/exec-routes.toml
+hermes-acp-relay --exec-routes /etc/hermes-acp-relay/exec-routes.toml
 ```
 
 You can also set `HERMES_ACP_RELAY_EXEC_ROUTES` instead of passing the flag.

@@ -16,13 +16,12 @@ exact touchpoints a version bump could break:
    relay's ``SerializedHermesACPAgent.prompt`` override reads (by keyword or as
    the second positional arg).
 
-These tests REQUIRE hermes-agent to be installed; CI installs it via
-``uv sync --all-packages --locked``. There is deliberately no ``importorskip`` —
-if the pinned hermes-agent is missing or an assertion here fails, the deployed
-relay would break on that version. This file is therefore the compatibility gate
-for bumping the ``hermes-agent`` pin in the root ``pyproject.toml``
-``[tool.uv.sources]``: a pin-bump PR must not merge while any assertion here is
-red.
+These tests REQUIRE hermes-agent to be installed; CI runs them inside the
+pinned hermes-agent image (``scripts/ci-test.sh``). There is deliberately no
+``importorskip`` — if hermes-agent is missing or an assertion here fails, the
+deployed relay would break on that version. This file is therefore the
+compatibility gate for moving the CI image digest: a digest-bump PR must not
+merge while any assertion here is red.
 
 Imports of the upstream package are kept inside the test bodies so a missing
 install surfaces as a targeted failure on these tests rather than a
@@ -91,12 +90,14 @@ def test_real_get_hermes_home_is_shimmable(fresh_shim_state, tmp_path, monkeypat
 
 
 def test_real_hermes_acp_agent_imports_and_constructs(tmp_path, monkeypatch):
-    """The upstream HermesACPAgent imports and constructs with no arguments."""
+    """The upstream HermesACPAgent imports and constructs in-process when given
+    a SessionManager."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
 
     from acp_adapter.server import HermesACPAgent
+    from acp_adapter.session import SessionManager
 
-    agent = HermesACPAgent()
+    agent = HermesACPAgent(SessionManager())
     assert isinstance(agent, HermesACPAgent)
 
 
@@ -116,8 +117,10 @@ def test_serialized_agent_wraps_real_hermes_acp_agent(tmp_path, monkeypatch):
     assert cls.prompt is not HermesACPAgent.prompt, "prompt wrapper not installed"
     assert inspect.iscoroutinefunction(cls.prompt)
 
+    # No-argument construction is what the WS handlers do; it must still yield
+    # the in-process agent rather than upstream's gateway client.
     inst = cls()
-    assert isinstance(inst, HermesACPAgent)
+    assert type(inst) is cls
 
 
 def test_upstream_prompt_signature_still_exposes_session_id():
