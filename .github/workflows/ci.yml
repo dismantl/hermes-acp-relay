@@ -9,18 +9,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    container:
+      # Keep equal to the digest in .forgejo/workflows/ci.yml.
+      image: nousresearch/hermes-agent@sha256:667a9dc77f303f6cd6e9ff62ce2c9580563597e09dde07fe5a224375988d6209
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.3.3
-
-      - name: Set up Python
-        run: uv python install 3.13
-
-      - name: Sync workspace
-        run: uv sync --all-packages --locked
-
-      - name: Run tests
-        run: uv run pytest
+      - name: Run tests against the image's hermes-agent
+        run: sh scripts/ci-test.sh

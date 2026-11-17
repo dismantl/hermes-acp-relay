@@ -3,12 +3,12 @@ name = "hermes-acp-relay"
 version = "0.2.0"
 description = "aiohttp WebSocket server exposing Hermes ACP for network access"
 requires-python = ">=3.11"
+# hermes-agent is not a declared dependency: upstream refuses to build it as a
+# wheel, so the relay is installed with --no-deps into the hermes-agent image,
+# which also supplies the ACP SDK version this relay must match.
 dependencies = [
     "aiohttp>=3.9",
-    # Keep ACP as a direct dependency because the relay imports it, but let the
-    # pinned hermes-agent[acp] extra own the exact compatible SDK version.
     "agent-client-protocol",
-    "hermes-agent[acp]",
 ]
 
 [project.scripts]

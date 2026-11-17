@@ -124,6 +124,14 @@ def _build_serialized_agent_class():
     from acp_adapter.server import HermesACPAgent
 
     class SerializedHermesACPAgent(HermesACPAgent):
+        def __new__(cls, session_manager=None):
+            # Upstream's HermesACPAgent.__new__ returns a GatewayACPAgent, a
+            # client of the profile's running gateway daemon, whenever no
+            # session manager is passed. The relay runs Hermes in its own
+            # process (and wraps prompt() below), so always take upstream's
+            # in-process branch; __init__ supplies the SessionManager.
+            return super(HermesACPAgent, cls).__new__(cls)
+
         async def prompt(self, *args, **kwargs):
             # Acquire the process-wide prompt lock with a wall-clock bound.
             # Under normal operation _prompt_lock is uncontested or briefly
