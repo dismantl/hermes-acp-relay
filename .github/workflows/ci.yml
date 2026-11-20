@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # Keep equal to the digest in .forgejo/workflows/ci.yml.
-      image: nousresearch/hermes-agent@sha256:667a9dc77f303f6cd6e9ff62ce2c9580563597e09dde07fe5a224375988d6209
+      image: nousresearch/hermes-agent@sha256:41468459379a943cf0a25a55589e230d244bd9f95b83cff5eca789470c892fac
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
